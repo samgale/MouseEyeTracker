@@ -10,6 +10,7 @@ import sip
 sip.setapi('QString', 2)
 import os, copy, time, math, cv2, h5py
 import numpy as np
+from scipy import signal
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
 from matplotlib import pyplot as plt
@@ -151,6 +152,7 @@ class MouseEyeTracker():
         self.imageViewBox = self.imageLayout.addViewBox(lockAspect=1,invertY=True,enableMouse=False,enableMenu=False)
         self.imageViewBox.keyPressEvent = self.mainWinKeyPressEvent
         self.imageItem = pg.ImageItem()
+        self.imageItem.mouseClickEvent = self.imageMouseClickEvent
         self.imageItem.mouseDoubleClickEvent = self.imageDoubleClickEvent
         self.imageViewBox.addItem(self.imageItem)
         self.pupilCenterPlot = pg.PlotDataItem(x=[],y=[],symbol='+',symbolSize=10,symbolPen='y')
@@ -190,6 +192,7 @@ class MouseEyeTracker():
         self.pupilAreaPlotItem.setMouseEnabled(x=False,y=False)
         self.pupilAreaPlotItem.hideButtons()
         self.pupilAreaPlotItem.setLabel('left','Pupil Area')
+        self.pupilAreaPlotItem.mouseClickEvent = self.dataPlotMouseClickEvent
         self.pupilAreaPlotItem.mouseDoubleClickEvent = self.dataPlotDoubleClickEvent
         self.pupilAreaPlot = self.pupilAreaPlotItem.plot(x=[0,self.defaultDataPlotDur],y=[0,0])
         self.pupilAreaPlotItem.disableAutoRange()
@@ -197,6 +200,7 @@ class MouseEyeTracker():
         self.pupilXPlotItem.setMouseEnabled(x=False,y=False)
         self.pupilXPlotItem.hideButtons()
         self.pupilXPlotItem.setLabel('left','Pupil X')
+        self.pupilXPlotItem.mouseClickEvent = self.dataPlotMouseClickEvent
         self.pupilXPlotItem.mouseDoubleClickEvent = self.dataPlotDoubleClickEvent
         self.pupilXPlot = self.pupilXPlotItem.plot(x=[0,self.defaultDataPlotDur],y=[0,0])
         self.pupilXPlotItem.disableAutoRange()
@@ -205,6 +209,7 @@ class MouseEyeTracker():
         self.pupilYPlotItem.hideButtons()
         self.pupilYPlotItem.setLabel('left','Pupil Y')
         self.pupilYPlotItem.setLabel('bottom','Time (s)')
+        self.pupilYPlotItem.mouseClickEvent = self.dataPlotMouseClickEvent
         self.pupilYPlotItem.mouseDoubleClickEvent = self.dataPlotDoubleClickEvent
         self.pupilYPlot = self.pupilYPlotItem.plot(x=[0,self.defaultDataPlotDur],y=[0,0])
         self.pupilYPlotItem.disableAutoRange()
@@ -217,7 +222,7 @@ class MouseEyeTracker():
             self.radialProfilePlot.append(self.pupilAreaPlotItem.plot(x=[0],y=[0]))
             self.radialProfilePixAboveThreshPlot.append(self.pupilXPlotItem.plot(x=[0],y=[0]))
         self.edgeDistPlot = self.pupilYPlotItem.plot(x=[0],y=[0])
-        self.pupilEdgeThreshLine = pg.InfiniteLine(pos=0,angle=0,pen='r',movable=True,bounds=(0,255))
+        self.pupilEdgeThreshLine = pg.InfiniteLine(pos=0,angle=0,pen='r',movable=True,bounds=(0,254))
         self.pupilEdgeThreshLine.sigPositionChangeFinished.connect(self.setPupilEdgeThresh)
         self.numPixAboveThreshLine = pg.InfiniteLine(pos=0,angle=0,pen='r',movable=True,bounds=(1,1e4))
         self.numPixAboveThreshLine.sigPositionChangeFinished.connect(self.setMinNumPixAboveThresh)
@@ -256,7 +261,7 @@ class MouseEyeTracker():
         
         # plot window duration edit
         self.plotDurLayout = QtGui.QFormLayout()
-        self.plotDurEdit = QtGui.QLineEdit(str(self.defaultDataPlotDur),enabled=False)
+        self.plotDurEdit = QtGui.QLineEdit(str(self.defaultDataPlotDur))
         self.plotDurEdit.setAlignment(QtCore.Qt.AlignHCenter)
         self.plotDurEdit.editingFinished.connect(self.changePlotWindowDur)
         self.plotDurLayout.addRow('Plot Duration',self.plotDurEdit)
@@ -812,6 +817,17 @@ class MouseEyeTracker():
                 self.imageViewBox.removeItem(self.maskRoi[-1])
                 del(self.maskRoi[-1])
                 del(self.maskIndex[-1])
+                
+    def imageMouseClickEvent(self,event):
+        if event.button() == QtCore.Qt.RightButton and not self.roiButton.isChecked() and not self.findReflectButton.isChecked() and self.reflectCenter is not None:
+            x,y = event.pos().x(),event.pos().y()
+            self.reflectRoiPos = [[int(x-self.reflectRoiSize[0][0]/2),int(y-self.reflectRoiSize[0][1]/2)]]
+            if not self.startVideoButton.isChecked():
+                self.trackReflect()
+                if self.reflectFound:
+                    self.reflectCenterPlot.setData(x=[self.reflectCenter[0]],y=[self.reflectCenter[1]])
+                else:
+                    self.reflectCenterPlot.setData(x=[],y=[])
             
     def imageDoubleClickEvent(self,event):
         x,y = event.pos().x(),event.pos().y()
@@ -839,6 +855,12 @@ class MouseEyeTracker():
                     self.updatePupilTrackParamPlots()
                 else:
                     self.updatePupilDataPlot()
+                    
+    def dataPlotMouseClickEvent(self,event):
+        if event.button() == QtCore.Qt.RightButton and self.cam is None and not any([button.isChecked() for button in self.buttons]):
+            validData = np.logical_not(np.isnan(self.pupilArea))
+            if any(validData):
+                self.frameNumSpinBox.setValue(np.where(validData)[0][-1]+1)
             
     def dataPlotDoubleClickEvent(self,event):
         if self.cam is None and not any([button.isChecked() for button in self.buttons]):
@@ -992,12 +1014,12 @@ class MouseEyeTracker():
                 centerInd = np.where(np.logical_and(xInFrame==int(self.pupilCenter[0]),yInFrame==int(self.pupilCenter[1])))[0][0]
                 self.radialProfiles[i,0:lineProfile.size-centerInd] = lineProfile[centerInd:]
                 self.radialProfiles[i+self.numRadialLines,:centerInd+1] = lineProfile[centerInd::-1]
-                if self.minNumPixAboveThresh<2:
-                    edgeInd1 = np.where(self.radialProfiles[i,:]>self.pupilEdgeThresh)[0]
-                    edgeInd2 = np.where(self.radialProfiles[i+self.numRadialLines,:]>self.pupilEdgeThresh)[0]
-                else:
+                if self.minNumPixAboveThresh>1:
                     edgeInd1 = np.where(np.correlate(self.radialProfiles[i,:]>self.pupilEdgeThresh,self.edgeFilt,mode='valid')==self.minNumPixAboveThresh)[0]
                     edgeInd2 = np.where(np.correlate(self.radialProfiles[i+self.numRadialLines,:]>self.pupilEdgeThresh,self.edgeFilt,mode='valid')==self.minNumPixAboveThresh)[0]
+                else:
+                    edgeInd1 = np.where(self.radialProfiles[i,:]>self.pupilEdgeThresh)[0]
+                    edgeInd2 = np.where(self.radialProfiles[i+self.numRadialLines,:]>self.pupilEdgeThresh)[0]
                 if edgeInd1.size>0:
                     self.pupilEdges[i,0] = xInFrame[centerInd+edgeInd1[0]]
                     self.pupilEdges[i,1] = yInFrame[centerInd+edgeInd1[0]]
@@ -1174,18 +1196,12 @@ class MouseEyeTracker():
         
     def setPupilEdgeThresh(self):
         self.pupilEdgeThresh = self.pupilEdgeThreshLine.value()
-        if self.pupilEdgeThresh<1:
-            self.pupilEdgeThresh = 1
-            self.pupilEdgeThreshLine.setValue(1)
         self.trackPupil()
         self.updatePupilPlot()
         self.updatePupilTrackParamPlots()
         
     def setMinNumPixAboveThresh(self):
         self.minNumPixAboveThresh = round(self.numPixAboveThreshLine.value())
-        if self.minNumPixAboveThresh<1:
-            self.minNumPixAboveThresh = 1
-        self.numPixAboveThreshLine.setValue(self.minNumPixAboveThresh)
         self.edgeFilt = np.ones(self.minNumPixAboveThresh)
         self.trackPupil()
         self.updatePupilPlot()
@@ -1221,6 +1237,10 @@ class MouseEyeTracker():
                 self.reflectRoiPos.append([int(n) for n in roi.pos()])
                 self.reflectRoiSize.append([int(n) for n in roi.size()])
             if self.toolsMenuReflectTypeSpot.isChecked() or len(self.reflectRoi)==4:
+                if self.toolsMenuReflectTypeRing.isChecked():
+                    self.getReflectTemplate()
+                    if not self.reflectFound:
+                        return
                 self.trackReflect()
                 if self.reflectFound:
                     self.reflectCenterPlot.setData(x=[self.reflectCenter[0]],y=[self.reflectCenter[1]])
@@ -1229,27 +1249,48 @@ class MouseEyeTracker():
                         self.updatePupilDataPlot()
             
     def trackReflect(self):
-        x = 0
-        y = 0
-        for i,roi in enumerate(self.reflectRoi):
-            center = self.getReflectCenter(self.reflectRoiPos[i],self.reflectRoiSize[i])
-            if center is None:
+        roiPos,roiSize = self.reflectRoiPos[0],self.reflectRoiSize[0]
+        if self.toolsMenuReflectTypeSpot.isChecked():
+            y,x = np.where(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]]>self.reflectThresh)
+            if any(y):
+                self.reflectCenter = (roiPos[0]+x.mean(),roiPos[1]+y.mean())
+            else:
                 self.reflectFound = False
                 return
-            else:
-                x += center[0]
-                y += center[1]
-                self.reflectRoiPos[i] = [int(center[0]-self.reflectRoiSize[i][0]/2),int(center[1]-self.reflectRoiSize[i][1]/2)]
-        self.reflectCenter = (x/(i+1),y/(i+1))
-        self.reflectFound = True
-            
-    def getReflectCenter(self,roiPos,roiSize):
-        y,x = np.where(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]]==255)
-        if any(y):
-            center = (roiPos[0]+x.mean(),roiPos[1]+y.mean())
         else:
-            center = None
-        return center
+            y,x = np.unravel_index(np.argmax(signal.fftconvolve(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]],self.reflectTemplate,mode='same')),roiSize)          
+            center = (roiPos[0]+x,roiPos[1]+y)
+            if any((center[i]-roiSize[i]<0 or center[i]+roiSize[i]>self.roiSize[i]-1 for i in [0,1])):
+                self.reflectFound = False
+                return
+            self.reflectCenter = center
+        self.reflectRoiPos = [[int(self.reflectCenter[0]-roiSize[0]/2),int(self.reflectCenter[1]-roiSize[1]/2)]]
+        self.reflectFound = True
+        
+    def getReflectTemplate(self):
+        spotCenters = np.zeros((4,2))
+        ptsAboveThresh = []
+        for i,(roiPos,roiSize) in enumerate(zip(self.reflectRoiPos,self.reflectRoiSize)):
+            y,x = np.where(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]]>self.reflectThresh)
+            if any(y):
+                spotCenters[i,:] = (roiPos[0]+x.mean(),roiPos[1]+y.mean())
+                ptsAboveThresh = min(ptsAboveThresh,len(y))
+            else:
+                self.reflectFound = False
+                return
+        self.reflectFound = True
+        for roi in self.reflectRoi[1:]:
+            self.imageViewBox.removeItem(roi)
+        del(self.reflectRoi[1:])
+        self.reflectCenter = spotCenters.mean(axis=0)
+        roiSize = 4*int(max(spotCenters.max(axis=0)-spotCenters.min(axis=0)))
+        self.reflectRoiSize = [[roiSize]*2]
+        self.reflectTemplate = np.zeros((roiSize,)*2,dtype=bool)
+        self.reflectRoiPos = [[int(self.reflectCenter[0]-roiSize/2),int(self.reflectCenter[1]-roiSize/2)]]
+        spotCenters = (spotCenters-(self.reflectCenter-roiSize/2)).astype(int)
+        m,n = int(ptsAboveThresh/2),int(round(ptsAboveThresh/2))
+        for center in spotCenters:     
+            self.reflectTemplate[center[1]-m:center[1]+n,center[0]-m:center[0]+n] = True
             
     def setReflectType(self):
         if self.mainWin.sender() is self.toolsMenuReflectTypeSpot:
@@ -1264,6 +1305,11 @@ class MouseEyeTracker():
             self.reflectRoi = []
             self.reflectCenter = None
             self.reflectCenterPlot.setData(x=[],y=[])
+            
+    def setReflectThresh(self):
+        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Reflection Threshold','Pixel intensity:',value=self.reflectThresh,min=0,max=254)
+        if ok:
+            self.reflectThresh = val
         
     def turnOffButtons(self,source=None):
         for button in self.buttons:
@@ -1318,11 +1364,6 @@ class MouseEyeTracker():
     def setDataPlotTime(self):
         self.dataPlotTime = np.arange(0,self.dataPlotDur-0.5/self.frameRate,1/self.frameRate)
         self.numDataPlotPts = self.dataPlotTime.size
-        
-    def setReflectThresh(self):
-        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Reflection Threshold','Pixel intensity:',value=self.reflectThresh,min=0,max=254)
-        if ok:
-            self.reflectThresh = val
         
     def setMmPerPix(self):
         val = 0 if np.isnan(self.mmPerPixel) else self.mmPerPixel
