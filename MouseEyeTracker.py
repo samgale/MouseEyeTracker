@@ -47,6 +47,7 @@ class MouseEyeTracker():
         self.reflectThresh = 254
         self.maskRoi = []
         self.mmPerPixel = np.nan
+        self.defaultMmPerPix = 0.0113
         self.lensRotRadius = 1.25
         self.lensOffset = 0.1
         self.corneaOffset = 0.2
@@ -1034,9 +1035,9 @@ class MouseEyeTracker():
                 meanEdgeDist = self.pupilEdgeDist.sum()/self.pupilEdgeDist.size
                 self.pupilEdges = self.pupilEdges[np.absolute(self.pupilEdgeDist-(meanEdgeDist+self.edgeDistThreshOffset))<self.edgeDistThreshFactor*np.sqrt(np.sum((self.pupilEdgeDist-meanEdgeDist)**2)/self.pupilEdgeDist.size)]
                 if self.pupilEdges.shape[0]>4:
-                    center,halfLength,angle = cv2.fitEllipse(self.pupilEdges)
+                    center,diameter,angle = cv2.fitEllipse(self.pupilEdges)
                     if 0<center[0]<self.roiSize[0]-1 and 0<center[1]<self.roiSize[1]-1:
-                        self.pupilCenter,self.pupilEllipseHalfLength,self.pupilEllipseAngle = center,halfLength,angle
+                        self.pupilCenter,self.pupilEllipseRadii,self.pupilEllipseAngle = center,[d/2 for d in diameter],angle
                         self.pupilFound = True
         self.updatePupilData()
         
@@ -1071,8 +1072,8 @@ class MouseEyeTracker():
             angle = self.pupilEllipseAngle*math.pi/180
             sinx = np.sin(np.arange(0,370,10)*math.pi/180)
             cosx = np.cos(np.arange(0,370,10)*math.pi/180)
-            self.pupilEllipsePlot.setData(x=self.pupilCenter[0]+self.pupilEllipseHalfLength[0]/2*cosx*math.cos(angle)-self.pupilEllipseHalfLength[1]/2*sinx*math.sin(angle),
-                                          y=self.pupilCenter[1]+self.pupilEllipseHalfLength[0]/2*cosx*math.sin(angle)+self.pupilEllipseHalfLength[1]/2*sinx*math.cos(angle))
+            self.pupilEllipsePlot.setData(x=self.pupilCenter[0]+self.pupilEllipseRadii[0]*cosx*math.cos(angle)-self.pupilEllipseRadii[1]*sinx*math.sin(angle),
+                                          y=self.pupilCenter[1]+self.pupilEllipseRadii[0]*cosx*math.sin(angle)+self.pupilEllipseRadii[1]*sinx*math.cos(angle))
         else:
             self.pupilCenterPlot.setData(x=[],y=[])
             self.pupilEllipsePlot.setData(x=[],y=[])
@@ -1088,7 +1089,7 @@ class MouseEyeTracker():
             self.pupilX[leadingPtsInd] = np.nan
             self.pupilY[leadingPtsInd] = np.nan
         if self.pupilFound and (self.reflectCenter is None or self.reflectFound):
-            self.pupilArea[self.dataPlotFrameInd] = math.pi*self.pupilEllipseHalfLength[1]**2
+            self.pupilArea[self.dataPlotFrameInd] = math.pi*self.pupilEllipseRadii[1]**2
             if not np.isnan(self.mmPerPixel):
                 self.pupilArea[self.dataPlotFrameInd] *= self.mmPerPixel**2
             if self.reflectCenter is None:
@@ -1098,8 +1099,13 @@ class MouseEyeTracker():
                 self.pupilX[self.dataPlotFrameInd] = self.pupilCenter[0]-self.reflectCenter[0]
                 self.pupilY[self.dataPlotFrameInd] = self.pupilCenter[1]-self.reflectCenter[1]
             else:
-                pupilRadius = (self.lensRotRadius**2-(self.pupilEllipseHalfLength[1]*self.mmPerPixel)**2)**0.5-self.lensOffset
-                self.pupilX[self.dataPlotFrameInd],self.pupilY[self.dataPlotFrameInd] = [180/math.pi*math.asin((pupilRadius*self.mmPerPixel*(self.reflectCenter[i]-self.pupilCenter[i])/(pupilRadius-self.corneaOffset))/pupilRadius) for i in (0,1)]
+                try:
+                    pupilRotRadius = (self.lensRotRadius**2-(self.pupilEllipseRadii[1]*self.mmPerPixel)**2)**0.5-self.lensOffset
+                    self.pupilX[self.dataPlotFrameInd],self.pupilY[self.dataPlotFrameInd] = [180/math.pi*math.asin((self.mmPerPixel*(self.reflectCenter[i]-self.pupilCenter[i])*pupilRotRadius/(pupilRotRadius-self.corneaOffset))/pupilRotRadius) for i in (0,1)]
+                except:
+                    self.pupilArea[self.dataPlotFrameInd] = np.nan
+                    self.pupilX[self.dataPlotFrameInd] = np.nan
+                    self.pupilY[self.dataPlotFrameInd] = np.nan 
         else:
             self.pupilArea[self.dataPlotFrameInd] = np.nan
             self.pupilX[self.dataPlotFrameInd] = np.nan
@@ -1366,7 +1372,7 @@ class MouseEyeTracker():
         self.numDataPlotPts = self.dataPlotTime.size
         
     def setMmPerPix(self):
-        val = 0 if np.isnan(self.mmPerPixel) else self.mmPerPixel
+        val = self.defaultMmPerPix if np.isnan(self.mmPerPixel) else self.mmPerPixel
         val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set mm/pixel','mm/pixel:',value=val,min=0,decimals=4)
         if ok:
             self.mmPerPixel = val if val>0 else np.nan
