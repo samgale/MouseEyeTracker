@@ -41,13 +41,12 @@ class MouseEyeTracker():
         self.dataFileOut = None
         self.image = None
         self.roi = None
-        self.pupilCenter = None
-        self.reflectCenter = None
+        self.pupilCenterSeed = None
+        self.reflectCenterSeed = None
         self.reflectRoi = []
         self.reflectThresh = 254
         self.maskRoi = []
         self.mmPerPixel = np.nan
-        self.defaultMmPerPix = 0.0113
         self.lensRotRadius = 1.25
         self.lensOffset = 0.1
         self.corneaOffset = 0.2
@@ -139,6 +138,13 @@ class MouseEyeTracker():
         self.toolsMenuMmPerPixMeasure = QtGui.QAction('Measure',self.mainWin,enabled=False)
         self.toolsMenuMmPerPixMeasure.triggered.connect(self.measureMmPerPix)
         self.toolsMenuMmPerPix.addActions([self.toolsMenuMmPerPixSet,self.toolsMenuMmPerPixMeasure])
+        
+        self.toolsMenuConvert = self.toolsMenu.addMenu('Convert')
+        self.toolsMenuConvertPixToDeg = QtGui.QAction('Pixels to Degrees',self.mainWin)
+        self.toolsMenuConvertPixToDeg.triggered.connect(self.pixToDeg)
+        self.toolsMenuConvertDegToPix = QtGui.QAction('Degrees to Pixels',self.mainWin)
+        self.toolsMenuConvertDegToPix.triggered.connect(self.degToPix)
+        self.toolsMenuConvert.addActions([self.toolsMenuConvertPixToDeg,self.toolsMenuConvertDegToPix])
         
         self.toolsMenuAnalyzeAll = QtGui.QAction('Analyze All Frames',self.mainWin,enabled=False)
         self.toolsMenuAnalyzeAll.triggered.connect(self.analyzeAllFrames)
@@ -346,7 +352,7 @@ class MouseEyeTracker():
             return
         self.fileSavePath = os.path.dirname(filePath)
         dataFile = h5py.File(filePath,'w',libver='latest')
-        for param in ('pupilArea','pupilX','pupilY'):
+        for param in ('reflectCenter','pupilCenter','pupilArea','pupilX','pupilY'):
             dataFile.create_dataset(param,data=getattr(self,param),compression='gzip',compression_opts=1)
         if self.dataFileIn is not None:
             self.getFrameTimes()
@@ -395,9 +401,6 @@ class MouseEyeTracker():
             line.setBounds((0,(self.numFrames-1)/self.frameRate))
         self.addFrameNumLines()
         self.plotDurEdit.setText(str(self.dataPlotDur))
-        self.pupilArea = np.full(self.numFrames,np.nan)
-        self.pupilX = np.full(self.numFrames,np.nan)
-        self.pupilY = np.full(self.numFrames,np.nan)
         self.frameNum = 1
         self.getVideoImage()
         self.initDisplay()
@@ -467,7 +470,6 @@ class MouseEyeTracker():
             self.dataPlotDur = self.defaultDataPlotDur
             self.frameNum = 0
             self.initDisplay()
-            self.resetPupilData()
             self.cameraMenuSettings.setEnabled(True)
             self.toolsMenuMmPerPixMeasure.setEnabled(True)
             if not self.cameraMenuNidaqIn.isChecked():
@@ -540,10 +542,10 @@ class MouseEyeTracker():
         if not ok:
             return
         scaleFactor = self.cam.BinningHorizontal/val
-        if self.pupilCenter is not None:
-            self.pupilCenter = [int(n*scaleFactor) for n in self.pupilCenter]
-        if self.reflectCenter is not None:
-            self.reflectCenter = [int(n*scaleFactor) for n in self.reflectCenter]
+        if self.pupilCenterSeed is not None:
+            self.pupilCenterSeed = [int(n*scaleFactor) for n in self.pupilCenterSeed]
+        if self.reflectCenterSeed is not None:
+            self.reflectCenterSeed = [int(n*scaleFactor) for n in self.reflectCenterSeed]
         for i,roi in enumerate(self.reflectRoi):
             self.reflectRoiPos[i] = [int(n*scaleFactor) for n in roi.pos()]
             self.reflectRoiSize[i] = [int(n*scaleFactor) for n in roi.size()]
@@ -554,12 +556,6 @@ class MouseEyeTracker():
                 roi.setPos([int(n*scaleFactor) for n in roi.pos()])
                 roi.setSize([int(n*scaleFactor) for n in roi.size()])
             self.updateMaskIndex()
-        self.camExposure *= self.cam.BinningHorizontal/val
-        if self.camExposure>0.99:
-            self.camExposure = 0.99
-        elif self.camExposure<0.01:
-            self.camExposure = 0.01
-        self.cam.ExposureTimeAbs = self.camExposure*1e6/self.frameRate
         self.cam.BinningHorizontal = val
         self.cam.BinningVertical = val
         self.resetROI()
@@ -611,8 +607,9 @@ class MouseEyeTracker():
     def initDisplay(self):
         self.resetROI()
         self.resetImage()
-        self.resetPupilDataPlot()        
         self.setDataPlotTime()
+        self.resetPupilData()
+        self.resetPupilDataPlot()        
         self.setDataPlotXRange()
                
     def resetROI(self):
@@ -630,19 +627,19 @@ class MouseEyeTracker():
     def resetImage(self):
         self.imageItem.setImage(self.image[self.roiInd].T,autoLevels=False,autoDownSample=True)
         self.imageViewBox.autoRange(items=[self.imageItem])
-        if self.pupilCenter is not None:
-            self.pupilCenterPlot.setData(x=[self.pupilCenter[0]],y=[self.pupilCenter[1]])
+        if self.pupilCenterSeed is not None:
+            self.pupilCenterPlot.setData(x=[self.pupilCenterSeed[0]],y=[self.pupilCenterSeed[1]])
             self.pupilEllipsePlot.setData(x=[],y=[])
-        if self.reflectCenter is not None:
-            self.reflectCenterPlot.setData(x=[self.reflectCenter[0]],y=[self.reflectCenter[1]])
+        if self.reflectCenterSeed is not None:
+            self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
         self.getRadialLines()
         
     def resetPupilTracking(self):
         self.pupilCenterPlot.setData(x=[],y=[])
         self.pupilEllipsePlot.setData(x=[],y=[])
-        self.pupilCenter = None
+        self.pupilCenterSeed = None
         self.reflectCenterPlot.setData(x=[],y=[])
-        self.reflectCenter = None
+        self.reflectCenterSeed = None
         for roi in self.reflectRoi:
             self.imageViewBox.removeItem(roi)
         self.reflectRoi = []
@@ -651,10 +648,13 @@ class MouseEyeTracker():
         self.maskRoi = []
         
     def resetPupilData(self):
-        self.dataPlotFrameInd = 0
-        self.pupilArea = np.full(self.numDataPlotPts,np.nan)
-        self.pupilX = np.full(self.numDataPlotPts,np.nan)
-        self.pupilY = np.full(self.numDataPlotPts,np.nan)
+        self.dataPlotIndex = 0
+        n = self.numFrames if self.cam is None else self.numDataPlotPts
+        self.reflectCenter = np.full((n,2),np.nan)
+        self.pupilCenter = np.full((n,2),np.nan)
+        self.pupilArea = np.full(n,np.nan)
+        self.pupilX = np.full(n,np.nan)
+        self.pupilY = np.full(n,np.nan)
             
     def resetPupilDataPlot(self):
         self.pupilAreaPlot.setData(x=[0,self.dataPlotDur],y=[0,0])
@@ -699,20 +699,23 @@ class MouseEyeTracker():
         n = (self.frameNum-1)%5
         if updateAll or (not updateNone and n==0):
             self.imageItem.setImage(self.image[self.roiInd].T,autoLevels=False,autoDownsample=True)
-        if self.reflectCenter is not None:
+        if self.cam is not None:
+            if self.dataPlotIndex==self.numDataPlotPts-1:
+                self.dataPlotIndex = 0
+            else:
+                self.dataPlotIndex += 1
+        if self.reflectCenterSeed is not None:
             self.trackReflect()
             if updateAll or (not updateNone and n==1):
                 if self.reflectFound:
-                    self.reflectCenterPlot.setData(x=[self.reflectCenter[0]],y=[self.reflectCenter[1]])
+                    self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
                 else:
                     self.reflectCenterPlot.setData(x=[],y=[])
-        if self.pupilCenter is not None:
-            if self.cam is not None:
-                self.dataPlotFrameInd += 1
+        if self.pupilCenterSeed is not None:
             self.trackPupil()
             if updateAll or (not updateNone and n==1):
                 self.updatePupilPlot()
-        if self.pupilCenter is not None or self.dataIsLoaded:
+        if self.pupilCenterSeed is not None or self.dataIsLoaded:
             if updateAll:
                 self.updatePupilDataPlot()
             elif not updateNone and n>1:
@@ -820,13 +823,13 @@ class MouseEyeTracker():
                 del(self.maskIndex[-1])
                 
     def imageMouseClickEvent(self,event):
-        if event.button() == QtCore.Qt.RightButton and not self.roiButton.isChecked() and not self.findReflectButton.isChecked() and self.reflectCenter is not None:
+        if event.button() == QtCore.Qt.RightButton and not self.roiButton.isChecked() and not self.findReflectButton.isChecked() and self.reflectCenterSeed is not None:
             x,y = event.pos().x(),event.pos().y()
             self.reflectRoiPos = [[int(x-self.reflectRoiSize[0][0]/2),int(y-self.reflectRoiSize[0][1]/2)]]
             if not self.startVideoButton.isChecked():
                 self.trackReflect()
                 if self.reflectFound:
-                    self.reflectCenterPlot.setData(x=[self.reflectCenter[0]],y=[self.reflectCenter[1]])
+                    self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
                 else:
                     self.reflectCenterPlot.setData(x=[],y=[])
             
@@ -847,8 +850,8 @@ class MouseEyeTracker():
             self.maskRoi.append(pg.ROI((int(x-roiSize/2),int(y-roiSize/2)),(roiSize,)*2,pen='r'))
             self.maskRoi[-1].addScaleHandle(pos=(1,1),center=(0.5,0.5))
             self.imageViewBox.addItem(self.maskRoi[-1])
-        elif not self.roiButton.isChecked() and (self.findPupilButton.isChecked() or self.pupilCenter is not None):
-            self.pupilCenter = (x,y)
+        elif not self.roiButton.isChecked() and (self.findPupilButton.isChecked() or self.pupilCenterSeed is not None):
+            self.pupilCenterSeed = (x,y)
             if self.findPupilButton.isChecked() or not self.startVideoButton.isChecked():
                 self.trackPupil()
                 self.updatePupilPlot()
@@ -880,10 +883,10 @@ class MouseEyeTracker():
                 self.roi.setSize(self.fullRoiSize)
                 # self.roi.setMaxBounds ?
                 self.roi.setVisible(True)
-            if self.pupilCenter is not None:
-                self.pupilCenter = (self.pupilCenter[0]+self.roiPos[0],self.pupilCenter[1]+self.roiPos[1])
-            if self.reflectCenter is not None:
-                self.reflectCenter = (self.reflectCenter[0]+self.roiPos[0],self.reflectCenter[1]+self.roiPos[1])
+            if self.pupilCenterSeed is not None:
+                self.pupilCenterSeed = (self.pupilCenterSeed[0]+self.roiPos[0],self.pupilCenterSeed[1]+self.roiPos[1])
+            if self.reflectCenterSeed is not None:
+                self.reflectCenterSeed = (self.reflectCenterSeed[0]+self.roiPos[0],self.reflectCenterSeed[1]+self.roiPos[1])
             for i,roi in enumerate(self.reflectRoi):
                 roi.setPos((roi.pos()[0]+self.roiPos[0],roi.pos()[1]+self.roiPos[1]))
                 self.reflectRoiPos[i][0] += self.roiPos[0]
@@ -897,10 +900,10 @@ class MouseEyeTracker():
         else:
             self.roiPos = [int(n) for n in self.roi.pos()]
             self.roiSize = [int(n) for n in self.roi.size()]
-            if self.pupilCenter is not None:
-                self.pupilCenter = (self.pupilCenter[0]-self.roiPos[0],self.pupilCenter[1]-self.roiPos[1])
-            if self.reflectCenter is not None:
-                self.reflectCenter = (self.reflectCenter[0]-self.roiPos[0],self.reflectCenter[1]-self.roiPos[1])
+            if self.pupilCenterSeed is not None:
+                self.pupilCenterSeed = (self.pupilCenterSeed[0]-self.roiPos[0],self.pupilCenterSeed[1]-self.roiPos[1])
+            if self.reflectCenterSeed is not None:
+                self.reflectCenterSeed = (self.reflectCenterSeed[0]-self.roiPos[0],self.reflectCenterSeed[1]-self.roiPos[1])
             for i,roi in enumerate(self.reflectRoi):
                 roi.setPos((roi.pos()[0]-self.roiPos[0],roi.pos()[1]-self.roiPos[1]))
                 self.reflectRoiPos[i][0] -= self.roiPos[0]
@@ -930,7 +933,7 @@ class MouseEyeTracker():
             for roi in self.maskRoi:
                 roi.setVisible(False)
             self.updateMaskIndex()
-            if self.pupilCenter is not None:
+            if self.pupilCenterSeed is not None:
                 self.trackPupil()
                 self.updatePupilPlot()
                 self.updatePupilDataPlot()
@@ -945,7 +948,7 @@ class MouseEyeTracker():
     def findPupil(self):
         if self.findPupilButton.isChecked():
             self.turnOffButtons(source=self.findPupilButton)
-            if self.pupilCenter is None:
+            if self.pupilCenterSeed is None:
                 self.pupilEdgeThresh = 2*self.image[self.roiInd][self.image[self.roiInd]>0].min()
                 self.minNumPixAboveThresh = 2
                 self.edgeFilt = np.ones(self.minNumPixAboveThresh)
@@ -967,7 +970,7 @@ class MouseEyeTracker():
             self.pupilXPlotItem.setLabel('left','Pixels > Thresh')
             self.pupilYPlotItem.setLabel('left','Pupil Edge Dist')
             self.pupilYPlotItem.setLabel('bottom','')
-            if self.pupilCenter is not None:
+            if self.pupilCenterSeed is not None:
                 self.updatePupilTrackParamPlots()
         else:
             self.pupilEdgePtsPlot.setData(x=[],y=[])
@@ -986,16 +989,16 @@ class MouseEyeTracker():
             self.pupilXPlotItem.setLabel('left','Pupil X')
             self.pupilYPlotItem.setLabel('left','Pupil Y')
             self.pupilYPlotItem.setLabel('bottom','Time (s)')
-            if self.pupilCenter is not None:
-                self.pupilAreaRange = [self.pupilArea[self.dataPlotFrameInd]]*2
-                self.pupilXRange = [self.pupilX[self.dataPlotFrameInd]]*2
-                self.pupilYRange = [self.pupilY[self.dataPlotFrameInd]]*2
+            if self.pupilCenterSeed is not None:
+                self.pupilAreaRange = [self.pupilArea[self.dataPlotIndex]]*2
+                self.pupilXRange = [self.pupilX[self.dataPlotIndex]]*2
+                self.pupilYRange = [self.pupilY[self.dataPlotIndex]]*2
                 self.setDataPlotXRange()
                 self.updatePupilDataPlot()
                 
     def trackPupil(self):
         self.pupilFound = False
-        if 0<self.pupilCenter[0]<self.roiSize[0]-1 and 0<self.pupilCenter[1]<self.roiSize[1]-1 and (self.reflectCenter is None or self.reflectFound):
+        if 0<self.pupilCenterSeed[0]<self.roiSize[0]-1 and 0<self.pupilCenterSeed[1]<self.roiSize[1]-1 and (self.reflectCenterSeed is None or self.reflectFound):
             # get radial profiles and find pupil edges
             # radial profile must cross edge thresh for min num of consecutive pix
             # radial profile = 0 for masked pixels
@@ -1003,8 +1006,8 @@ class MouseEyeTracker():
             if self.useMaskCheckBox.isChecked() and len(self.maskRoi)>0:
                 for ind in self.maskIndex:
                     img[ind] = 0
-            x = self.radialLinesX+int(self.pupilCenter[0])
-            y = self.radialLinesY+int(self.pupilCenter[1])
+            x = self.radialLinesX+int(self.pupilCenterSeed[0])
+            y = self.radialLinesY+int(self.pupilCenterSeed[1])
             inFrame = np.logical_and(np.logical_and(x>=0,x<self.roiSize[0]),np.logical_and(y>=0,y<self.roiSize[1]))
             self.radialProfiles[:,:] = 0
             self.pupilEdges = np.zeros((self.numRadialLines*2,2),dtype=np.float32)
@@ -1012,7 +1015,7 @@ class MouseEyeTracker():
                 xInFrame = x[i,inFrame[i,:]]
                 yInFrame = y[i,inFrame[i,:]]
                 lineProfile = img[yInFrame,xInFrame]
-                centerInd = np.where(np.logical_and(xInFrame==int(self.pupilCenter[0]),yInFrame==int(self.pupilCenter[1])))[0][0]
+                centerInd = np.where(np.logical_and(xInFrame==int(self.pupilCenterSeed[0]),yInFrame==int(self.pupilCenterSeed[1])))[0][0]
                 self.radialProfiles[i,0:lineProfile.size-centerInd] = lineProfile[centerInd:]
                 self.radialProfiles[i+self.numRadialLines,:centerInd+1] = lineProfile[centerInd::-1]
                 if self.minNumPixAboveThresh>1:
@@ -1031,13 +1034,13 @@ class MouseEyeTracker():
             # throw out edge points with outlier distances from center
             self.pupilEdges = self.pupilEdges[self.pupilEdges.any(axis=1),:]
             if self.pupilEdges.shape[0]>0:
-                self.pupilEdgeDist = np.sqrt(np.sum((self.pupilEdges-self.pupilCenter)**2,axis=1))
+                self.pupilEdgeDist = np.sqrt(np.sum((self.pupilEdges-self.pupilCenterSeed)**2,axis=1))
                 meanEdgeDist = self.pupilEdgeDist.sum()/self.pupilEdgeDist.size
                 self.pupilEdges = self.pupilEdges[np.absolute(self.pupilEdgeDist-(meanEdgeDist+self.edgeDistThreshOffset))<self.edgeDistThreshFactor*np.sqrt(np.sum((self.pupilEdgeDist-meanEdgeDist)**2)/self.pupilEdgeDist.size)]
                 if self.pupilEdges.shape[0]>4:
                     center,diameter,angle = cv2.fitEllipse(self.pupilEdges)
                     if 0<center[0]<self.roiSize[0]-1 and 0<center[1]<self.roiSize[1]-1:
-                        self.pupilCenter,self.pupilEllipseRadii,self.pupilEllipseAngle = center,[d/2 for d in diameter],angle
+                        self.pupilCenterSeed,self.pupilEllipseRadii,self.pupilEllipseAngle = center,[d/2 for d in diameter],angle
                         self.pupilFound = True
         self.updatePupilData()
         
@@ -1067,49 +1070,48 @@ class MouseEyeTracker():
         self.radialProfiles = np.zeros((self.numRadialLines*2,max(self.roiSize)),dtype=np.uint8)
         
     def updatePupilPlot(self):
-        if self.pupilFound and (self.reflectCenter is None or self.reflectFound):
-            self.pupilCenterPlot.setData(x=[self.pupilCenter[0]],y=[self.pupilCenter[1]])
+        if self.pupilFound and (self.reflectCenterSeed is None or self.reflectFound):
+            self.pupilCenterPlot.setData(x=[self.pupilCenterSeed[0]],y=[self.pupilCenterSeed[1]])
             angle = self.pupilEllipseAngle*math.pi/180
             sinx = np.sin(np.arange(0,370,10)*math.pi/180)
             cosx = np.cos(np.arange(0,370,10)*math.pi/180)
-            self.pupilEllipsePlot.setData(x=self.pupilCenter[0]+self.pupilEllipseRadii[0]*cosx*math.cos(angle)-self.pupilEllipseRadii[1]*sinx*math.sin(angle),
-                                          y=self.pupilCenter[1]+self.pupilEllipseRadii[0]*cosx*math.sin(angle)+self.pupilEllipseRadii[1]*sinx*math.cos(angle))
+            self.pupilEllipsePlot.setData(x=self.pupilCenterSeed[0]+self.pupilEllipseRadii[0]*cosx*math.cos(angle)-self.pupilEllipseRadii[1]*sinx*math.sin(angle),
+                                          y=self.pupilCenterSeed[1]+self.pupilEllipseRadii[0]*cosx*math.sin(angle)+self.pupilEllipseRadii[1]*sinx*math.cos(angle))
         else:
             self.pupilCenterPlot.setData(x=[],y=[])
             self.pupilEllipsePlot.setData(x=[],y=[])
             
     def updatePupilData(self):
         if self.cam is None:
-            self.dataPlotFrameInd = self.frameNum-1
+            self.dataPlotIndex = self.frameNum-1
         else:
-            if self.dataPlotFrameInd==self.numDataPlotPts:
-                self.dataPlotFrameInd = 0
-            leadingPtsInd = np.s_[self.dataPlotFrameInd+1:self.dataPlotFrameInd+math.ceil(self.numDataPlotPts/10)]
+            leadingPtsInd = np.s_[self.dataPlotIndex+1:self.dataPlotIndex+math.ceil(self.numDataPlotPts/10)]
             self.pupilArea[leadingPtsInd] = np.nan
-            self.pupilX[leadingPtsInd] = np.nan
-            self.pupilY[leadingPtsInd] = np.nan
-        if self.pupilFound and (self.reflectCenter is None or self.reflectFound):
-            self.pupilArea[self.dataPlotFrameInd] = math.pi*self.pupilEllipseRadii[1]**2
+            self.pupilX[leadingPtsInd,:] = np.nan
+            self.pupilY[leadingPtsInd,:] = np.nan
+        if self.pupilFound and (self.reflectCenterSeed is None or self.reflectFound):
+            self.pupilCenter[self.dataPlotIndex,:] = self.pupilCenterSeed
+            self.pupilArea[self.dataPlotIndex] = math.pi*self.pupilEllipseRadii[1]**2
             if not np.isnan(self.mmPerPixel):
-                self.pupilArea[self.dataPlotFrameInd] *= self.mmPerPixel**2
-            if self.reflectCenter is None:
-                self.pupilX[self.dataPlotFrameInd] = self.pupilCenter[0]
-                self.pupilY[self.dataPlotFrameInd] = self.pupilCenter[1] 
+                self.pupilArea[self.dataPlotIndex] *= self.mmPerPixel**2
+            if self.reflectCenterSeed is None:
+                self.pupilX[self.dataPlotIndex] = self.pupilCenterSeed[0]
+                self.pupilY[self.dataPlotIndex] = self.pupilCenterSeed[1] 
             elif np.isnan(self.mmPerPixel) or self.toolsMenuReflectTypeSpot.isChecked():
-                self.pupilX[self.dataPlotFrameInd] = self.pupilCenter[0]-self.reflectCenter[0]
-                self.pupilY[self.dataPlotFrameInd] = self.pupilCenter[1]-self.reflectCenter[1]
+                self.pupilX[self.dataPlotIndex] = self.pupilCenterSeed[0]-self.reflectCenterSeed[0]
+                self.pupilY[self.dataPlotIndex] = self.pupilCenterSeed[1]-self.reflectCenterSeed[1]
             else:
                 try:
                     pupilRotRadius = (self.lensRotRadius**2-(self.pupilEllipseRadii[1]*self.mmPerPixel)**2)**0.5-self.lensOffset
-                    self.pupilX[self.dataPlotFrameInd],self.pupilY[self.dataPlotFrameInd] = [180/math.pi*math.asin((self.mmPerPixel*(self.reflectCenter[i]-self.pupilCenter[i])*pupilRotRadius/(pupilRotRadius-self.corneaOffset))/pupilRotRadius) for i in (0,1)]
+                    self.pupilX[self.dataPlotIndex],self.pupilY[self.dataPlotIndex] = [180/math.pi*math.asin((self.mmPerPixel*(self.reflectCenterSeed[i]-self.pupilCenterSeed[i])*pupilRotRadius/(pupilRotRadius-self.corneaOffset))/pupilRotRadius) for i in (0,1)]
                 except:
-                    self.pupilArea[self.dataPlotFrameInd] = np.nan
-                    self.pupilX[self.dataPlotFrameInd] = np.nan
-                    self.pupilY[self.dataPlotFrameInd] = np.nan 
+                    self.pupilArea[self.dataPlotIndex] = np.nan
+                    self.pupilX[self.dataPlotIndex] = np.nan
+                    self.pupilY[self.dataPlotIndex] = np.nan 
         else:
-            self.pupilArea[self.dataPlotFrameInd] = np.nan
-            self.pupilX[self.dataPlotFrameInd] = np.nan
-            self.pupilY[self.dataPlotFrameInd] = np.nan
+            self.pupilArea[self.dataPlotIndex] = np.nan
+            self.pupilX[self.dataPlotIndex] = np.nan
+            self.pupilY[self.dataPlotIndex] = np.nan
         
     def updatePupilDataPlot(self,updatePlotN=[True,True,True]):
         if self.cam is None:
@@ -1249,8 +1251,8 @@ class MouseEyeTracker():
                         return
                 self.trackReflect()
                 if self.reflectFound:
-                    self.reflectCenterPlot.setData(x=[self.reflectCenter[0]],y=[self.reflectCenter[1]])
-                    if self.pupilCenter is not None:
+                    self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
+                    if self.pupilCenterSeed is not None:
                         self.updatePupilData()
                         self.updatePupilDataPlot()
             
@@ -1259,7 +1261,7 @@ class MouseEyeTracker():
         if self.toolsMenuReflectTypeSpot.isChecked():
             y,x = np.where(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]]>self.reflectThresh)
             if any(y):
-                self.reflectCenter = (roiPos[0]+x.mean(),roiPos[1]+y.mean())
+                self.reflectCenterSeed = (roiPos[0]+x.mean(),roiPos[1]+y.mean())
             else:
                 self.reflectFound = False
                 return
@@ -1269,9 +1271,13 @@ class MouseEyeTracker():
             if any((center[i]-roiSize[i]<0 or center[i]+roiSize[i]>self.roiSize[i]-1 for i in [0,1])):
                 self.reflectFound = False
                 return
-            self.reflectCenter = center
-        self.reflectRoiPos = [[int(self.reflectCenter[0]-roiSize[0]/2),int(self.reflectCenter[1]-roiSize[1]/2)]]
-        self.reflectFound = True
+            self.reflectCenterSeed = center
+        self.reflectRoiPos = [[int(self.reflectCenterSeed[0]-roiSize[0]/2),int(self.reflectCenterSeed[1]-roiSize[1]/2)]]
+        self.reflectFound = True        
+        if self.cam is None:
+            self.reflectCenter[self.frameNum-1,:] = self.reflectCenterSeed
+        else:
+            self.reflectCenter[self.dataPlotIndex,:] = self.reflectCenterSeed
         
     def getReflectTemplate(self):
         spotCenters = np.zeros((4,2))
@@ -1288,12 +1294,12 @@ class MouseEyeTracker():
         for roi in self.reflectRoi[1:]:
             self.imageViewBox.removeItem(roi)
         del(self.reflectRoi[1:])
-        self.reflectCenter = spotCenters.mean(axis=0)
+        self.reflectCenterSeed = spotCenters.mean(axis=0)
         roiSize = 4*int(max(spotCenters.max(axis=0)-spotCenters.min(axis=0)))
         self.reflectRoiSize = [[roiSize]*2]
         self.reflectTemplate = np.zeros((roiSize,)*2,dtype=bool)
-        self.reflectRoiPos = [[int(self.reflectCenter[0]-roiSize/2),int(self.reflectCenter[1]-roiSize/2)]]
-        spotCenters = (spotCenters-(self.reflectCenter-roiSize/2)).astype(int)
+        self.reflectRoiPos = [[int(self.reflectCenterSeed[0]-roiSize/2),int(self.reflectCenterSeed[1]-roiSize/2)]]
+        spotCenters = (spotCenters-(self.reflectCenterSeed-roiSize/2)).astype(int)
         m,n = int(ptsAboveThresh/2),int(round(ptsAboveThresh/2))
         for center in spotCenters:     
             self.reflectTemplate[center[1]-m:center[1]+n,center[0]-m:center[0]+n] = True
@@ -1309,7 +1315,7 @@ class MouseEyeTracker():
             for roi in self.reflectRoi:
                 self.imageViewBox.removeItem(roi)
             self.reflectRoi = []
-            self.reflectCenter = None
+            self.reflectCenterSeed = None
             self.reflectCenterPlot.setData(x=[],y=[])
             
     def setReflectThresh(self):
@@ -1372,18 +1378,24 @@ class MouseEyeTracker():
         self.numDataPlotPts = self.dataPlotTime.size
         
     def setMmPerPix(self):
-        val = self.defaultMmPerPix if np.isnan(self.mmPerPixel) else self.mmPerPixel
+        val = 0 if np.isnan(self.mmPerPixel) else self.mmPerPixel
         val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set mm/pixel','mm/pixel:',value=val,min=0,decimals=4)
         if ok:
             self.mmPerPixel = val if val>0 else np.nan
     
     def measureMmPerPix(self):
-        if self.reflectCenter is None:
+        if self.reflectCenterSeed is None:
             QtGui.QMessageBox.about(self.mainWin,'Set mm/pixel','First find reflection')
         else:
-            initialReflectCenter = self.reflectCenter
+            p = int(0.5*self.frameRate)
+            avgPts = p if self.numDataPlotPts>=p else self.numDataPlotPts
+            initialReflectCenter = self.getAvgReflectCenter(avgPts)
             QtGui.QMessageBox.about(self.mainWin,'Set mm/pixel','Move camera 0.5 mm; then press ok')
-            self.mmPerPixel = 0.5/(((self.reflectCenter[0]-initialReflectCenter[0])**2+(self.reflectCenter[1]-initialReflectCenter[1])**2)**0.5)
+            finalReflectCenter = self.getAvgReflectCenter(avgPts)
+            self.mmPerPixel = 0.5/np.sqrt(np.sum((finalReflectCenter-initialReflectCenter)**2))
+            
+    def getAvgReflectCenter(self,avgPts):
+        return np.mean(np.tile(self.reflectCenter,(2,1))[:self.numDataPlotPts+self.dataPlotIndex,:][-avgPts:,:],axis=0)
             
     def analyzeAllFrames(self):
         while self.frameNum<self.numFrames:
@@ -1401,7 +1413,7 @@ class MouseEyeTracker():
             return
         self.fileOpenPath = os.path.dirname(filePath)
         dataFile = h5py.File(filePath,'r')
-        for param in ('pupilArea','pupilX','pupilY'):
+        for param in ('reflectCenter','pupilCenter','pupilArea','pupilX','pupilY'):
             setattr(self,param,dataFile[param][:])
         if self.dataFileIn is not None:
             self.frameTimes = dataFile['frameTimes'][:]
@@ -1410,6 +1422,18 @@ class MouseEyeTracker():
         self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
         self.pupilYRange = [self.pupilY[self.frameNum-1]]*2
         self.setDataPlotXRange()
+        self.updatePupilDataPlot()
+        
+    def pixToDeg(self):
+        pupilEllipseRadius = (self.pupilArea/math.pi)**0.5
+        pupilRotRadius = (self.lensRotRadius**2-(pupilEllipseRadius*self.mmPerPixel)**2)**0.5-self.lensOffset
+        self.pupilX,self.pupilY = [180/math.pi*np.arcsin((self.mmPerPixel*(self.reflectCenter[:,i]-self.pupilCenter[:,i])*pupilRotRadius/(pupilRotRadius-self.corneaOffset))/pupilRotRadius) for i in (0,1)]
+        self.pupilArea *= self.mmPerPixel**2
+        self.updatePupilDataPlot()
+                    
+    def degToPix(self):
+        self.pupilArea /= self.mmPerPixel**2
+        self.pupilX,self.pupilY = [self.pupilCenter[:,i]-self.reflectCenter[:,i] for i in (0,1)]
         self.updatePupilDataPlot()
     
     def plotFrameIntervals(self):
