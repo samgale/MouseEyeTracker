@@ -28,9 +28,8 @@ class MouseEyeTracker():
     
     def __init__(self,app):
         self.app = app
-        self.fileOpenPath = os.path.dirname(os.path.realpath(__file__))
-        self.fileSavePath = copy.copy(self.fileOpenPath)
-        self.camSavePath = copy.copy(self.fileOpenPath)
+        self.fileOpenSavePath = os.path.dirname(os.path.realpath(__file__))
+        self.camSavePath = copy.copy(self.fileOpenSavePath)
         self.camSaveBaseName = 'MouseEyeTracker'
         self.nidaq = False
         self.vimba = None
@@ -45,6 +44,7 @@ class MouseEyeTracker():
         self.setDataNan = False
         self.pupilCenterSeed = None
         self.pupilRoi = None
+        self.pupilCircularityThresh = 0.65
         self.pupilGradientDownsample = 0.5
         self.reflectCenterSeed = None
         self.reflectRoi = []
@@ -60,7 +60,7 @@ class MouseEyeTracker():
         self.negSaccades = np.array([],dtype=int)
         self.posSaccades = self.negSaccades.copy()
         self.saccadeSmoothPts = 3
-        self.saccadeThresh = 0.5
+        self.saccadeThresh = 5
         self.saccadeRefractoryPeriod = 0.1
         
         # signal generator object
@@ -152,6 +152,14 @@ class MouseEyeTracker():
         self.trackMenuReflectThresh.triggered.connect(self.setReflectThresh)
         self.trackMenu.addAction(self.trackMenuReflectThresh)
         
+        self.trackMenuPupilSign = self.trackMenu.addMenu('Pupil Sign')
+        self.trackMenuPupilSignNeg = QtGui.QAction('Negative',self.mainWin,checkable=True)
+        self.trackMenuPupilSignNeg.setChecked(True)
+        self.trackMenuPupilSignNeg.triggered.connect(self.setPupilSign)
+        self.trackMenuPupilSignPos = QtGui.QAction('Positive',self.mainWin,checkable=True)
+        self.trackMenuPupilSignPos.triggered.connect(self.setPupilSign)
+        self.trackMenuPupilSign.addActions([self.trackMenuPupilSignNeg,self.trackMenuPupilSignPos])
+        
         self.trackMenuPupilMethod = self.trackMenu.addMenu('Pupil Track Method')
         self.trackMenuPupilMethodStarburst = QtGui.QAction('Starburst',self.mainWin,checkable=True)
         self.trackMenuPupilMethodStarburst.setChecked(True)
@@ -162,15 +170,12 @@ class MouseEyeTracker():
         self.trackMenuPupilMethodGradients.triggered.connect(self.setPupilTrackMethod)
         self.trackMenuPupilMethod.addActions([self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients])
         
-        self.trackMenuPupilSign = self.trackMenu.addMenu('Pupil Sign')
-        self.trackMenuPupilSignNeg = QtGui.QAction('Negative',self.mainWin,checkable=True)
-        self.trackMenuPupilSignNeg.setChecked(True)
-        self.trackMenuPupilSignNeg.triggered.connect(self.setPupilSign)
-        self.trackMenuPupilSignPos = QtGui.QAction('Positive',self.mainWin,checkable=True)
-        self.trackMenuPupilSignPos.triggered.connect(self.setPupilSign)
-        self.trackMenuPupilSign.addActions([self.trackMenuPupilSignNeg,self.trackMenuPupilSignPos])
+        self.trackMenuCircularity = QtGui.QAction('Circularity',self.mainWin)
+        self.trackMenuCircularity.triggered.connect(self.setCircularityThresh)
+        self.trackMenu.addAction(self.trackMenuCircularity)
         
         self.trackMenuLineOrigin = self.trackMenu.addMenu('Line Origin')
+        self.trackMenuLineOrigin.setEnabled(False)
         self.trackMenuLineOriginLeft = QtGui.QAction('Left',self.mainWin,checkable=True)
         self.trackMenuLineOriginLeft.setChecked(True)
         self.trackMenuLineOriginLeft.triggered.connect(self.setPupilEdgeLineOrigin)
@@ -178,9 +183,9 @@ class MouseEyeTracker():
         self.trackMenuLineOriginRight.triggered.connect(self.setPupilEdgeLineOrigin)
         self.trackMenuLineOrigin.addActions([self.trackMenuLineOriginLeft,self.trackMenuLineOriginRight])        
         
-        self.trackMenuGradientDownSamp = QtGui.QAction('Gradient Downsample',self.mainWin)
-        self.trackMenuGradientDownSamp.triggered.connect(self.setPupilGradientDownsample)
-        self.trackMenu.addAction(self.trackMenuGradientDownSamp)
+        self.trackMenuGradientDownsamp = QtGui.QAction('Gradient Downsample',self.mainWin,enabled=False)
+        self.trackMenuGradientDownsamp.triggered.connect(self.setPupilGradientDownsample)
+        self.trackMenu.addAction(self.trackMenuGradientDownsamp)
         
         # analysis menu
         self.analysisMenu = self.menuBar.addMenu('Analysis')
@@ -230,29 +235,25 @@ class MouseEyeTracker():
         self.reflectCenterPlot = pg.PlotDataItem(x=[],y=[],symbol='+',symbolSize=10,symbolPen='r')
         self.imageViewBox.addItem(self.reflectCenterPlot)
         
-        # start video button
+        # buttons
         self.startVideoButton = QtGui.QPushButton('Start Video',checkable=True)
         self.startVideoButton.clicked.connect(self.startVideo)
         
-        # set roi button
         self.roiButton = QtGui.QPushButton('Set ROI',checkable=True)
         self.roiButton.clicked.connect(self.setROI)
         
-        # find pupil button
         self.findPupilButton = QtGui.QPushButton('Find Pupil',checkable=True)
         self.findPupilButton.clicked.connect(self.findPupil)
         
-        # find reflection button
         self.findReflectButton = QtGui.QPushButton('Find Reflection',checkable=True)
         self.findReflectButton.clicked.connect(self.findReflect)
         
-        # set mask button
         self.setMaskButton = QtGui.QPushButton('Set Masks',checkable=True)
         self.setMaskButton.clicked.connect(self.setMask)
         
         self.buttons = (self.startVideoButton,self.roiButton,self.findPupilButton,self.findReflectButton,self.setMaskButton)
         
-        # plot windows
+        # data plots
         self.dataPlotLayout = pg.GraphicsLayoutWidget()
         self.pupilAreaPlotItem = self.dataPlotLayout.addPlot(row=0,col=0,enableMenu=False)
         self.pupilAreaPlotItem.setMouseEnabled(x=False,y=False)
@@ -277,7 +278,6 @@ class MouseEyeTracker():
         self.pupilYPlotItem.disableAutoRange()
         
         # saccade plots
-        # make up and down triangle symbols (see pg.ScatterPlotItem)
         triangles = [QtGui.QPainterPath() for _ in range(2)]
         xpts = [(-0.5,0,0.5)]*2
         ypts = [(-0.5,0.5,-0.5),(0.5,-0.5,0.5)]
@@ -307,10 +307,8 @@ class MouseEyeTracker():
         self.edgeDistLowerThreshLine = pg.InfiniteLine(pos=0,angle=0,pen='r',movable=True,bounds=(0,1e4))
         self.edgeDistLowerThreshLine.sigPositionChangeFinished.connect(self.setEdgeDistThresh)
         
-        # save checkbox
+        # save and mask checkboxes
         self.saveCheckBox = QtGui.QCheckBox('Save Video Data',enabled=False)
-        
-        # use mask checkbox
         self.useMaskCheckBox = QtGui.QCheckBox('Use Masks')
         
         # frame navigation
@@ -335,7 +333,7 @@ class MouseEyeTracker():
         self.pupilYFrameNumLine.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)
         self.frameNumLines = (self.pupilAreaFrameNumLine,self.pupilXFrameNumLine,self.pupilYFrameNumLine)
         
-        # plot window duration edit
+        # data plot duration control
         self.plotDurLayout = QtGui.QFormLayout()
         self.plotDurEdit = QtGui.QLineEdit(str(self.defaultDataPlotDur))
         self.plotDurEdit.setAlignment(QtCore.Qt.AlignHCenter)
@@ -384,11 +382,12 @@ class MouseEyeTracker():
         event.accept()
         
     def saveHDF5(self):
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileSavePath,'*.hdf5')
+        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.hdf5')
         if filePath=='':
             return
-        self.fileSavePath = os.path.dirname(filePath)
+        self.fileOpenSavePath = os.path.dirname(filePath)
         dataFile = h5py.File(filePath,'w',libver='latest')
+        dataFile.attrs.create('mmPerPixel',self.mmPerPixel)
         for param in ('reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades'):
             dataFile.create_dataset(param,data=getattr(self,param),compression='gzip',compression_opts=1)
         if self.dataFileIn is not None:
@@ -397,10 +396,10 @@ class MouseEyeTracker():
         dataFile.close()
         
     def saveMovie(self):
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileSavePath,'*.avi')
+        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
         if filePath=='':
             return
-        self.fileSavePath = os.path.dirname(filePath)
+        self.fileOpenSavePath = os.path.dirname(filePath)
         vidOut = cv2.VideoWriter(filePath,-1,self.frameRate,self.roiSize)
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,0)
@@ -423,16 +422,16 @@ class MouseEyeTracker():
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         
     def saveAnnotatedMovie(self):
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileSavePath,'*.avi')
+        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
         if filePath=='':
             return
-        self.fileSavePath = os.path.dirname(filePath)
+        self.fileOpenSavePath = os.path.dirname(filePath)
                
     def loadFrameData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenPath,'*.avi *.mov *.hdf5')
+        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
         if filePath=='':
             return
-        self.fileOpenPath = os.path.dirname(filePath)
+        self.fileOpenSavePath = os.path.dirname(filePath)
         if self.cam is not None:
             self.cameraMenuUseCam.setChecked(False)
             self.closeCamera()
@@ -718,6 +717,9 @@ class MouseEyeTracker():
         for roi in self.maskRoi:
             self.imageViewBox.removeItem(roi)
         self.maskRoi = []
+        self.trackMenuStopTracking.setChecked(False)
+        self.stopTracking = False
+        self.setDataNan = False
         
     def resetPupilData(self):
         self.dataPlotIndex = 0
@@ -945,7 +947,6 @@ class MouseEyeTracker():
             
     def imageDoubleClickEvent(self,event):
         x,y = event.pos().x(),event.pos().y()
-        print(x,y)
         if self.findReflectButton.isChecked():
             n = len(self.reflectRoi)
             if n<1 or (self.trackMenuReflectTypeRing.isChecked() and n<4):
@@ -1083,8 +1084,7 @@ class MouseEyeTracker():
                     self.pupilEdgeThresh = 2*self.image[self.roiInd][self.image[self.roiInd]>0].min()
                     self.minNumPixAboveThresh = 2
                     self.edgeFilt = np.ones(self.minNumPixAboveThresh)
-                    self.edgeDistThreshOffset = 0
-                    self.edgeDistThreshFactor = 6
+                    self.edgeDistThresh = np.array([-6,6])
                 self.pupilAreaPlot.setData(x=[],y=[])
                 self.pupilXPlot.setData(x=[],y=[])
                 self.pupilYPlot.setData(x=[],y=[])
@@ -1196,11 +1196,13 @@ class MouseEyeTracker():
             self.pupilEdges = self.pupilEdges[self.pupilEdges.any(axis=1)]
             if self.pupilEdges.shape[0]>0:
                 self.pupilEdgeDist = np.sqrt(np.sum((self.pupilEdges-self.pupilCenterSeed)**2,axis=1))
-                self.pupilEdges = self.pupilEdges[np.absolute(self.pupilEdgeDist-(self.pupilEdgeDist.mean()+self.edgeDistThreshOffset))<self.edgeDistThreshFactor*self.pupilEdgeDist.std()]
+                normDist = self.pupilEdgeDist-self.pupilEdgeDist.mean()
+                distThresh = self.edgeDistThresh*self.pupilEdgeDist.std()
+                self.pupilEdges = self.pupilEdges[np.logical_and(normDist>distThresh[0],normDist<distThresh[1])]
                 # fit ellipse to edge points
                 if self.pupilEdges.shape[0]>4:
                     center,diameter,angle = cv2.fitEllipse(self.pupilEdges)
-                    if 0<center[0]<self.roiSize[0]-1 and 0<center[1]<self.roiSize[1]-1:
+                    if 0<center[0]<self.roiSize[0]-1 and 0<center[1]<self.roiSize[1]-1 and diameter[1]>0 and diameter[0]/diameter[1]>self.pupilCircularityThresh:
                         self.pupilCenterSeed,self.pupilEllipseRadii,self.pupilEllipseAngle = center,[d/2 for d in diameter],angle
                         self.pupilFound = True
         
@@ -1312,16 +1314,6 @@ class MouseEyeTracker():
         self.pupilCenterSeed = [int(center[i]/self.pupilGradientDownsample)+self.pupilRoiPos[i] for i in (0,1)]
         self.pupilFound = True
         
-    def setPupilTrackMethod(self):
-        for option in (self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodGradients,self.trackMenuPupilMethodLine):
-            if option is self.mainWin.sender():
-                option.setChecked(True)
-            else:
-                option.setChecked(False)
-        self.pupilCenterSeed = None
-        self.pupilCenterPlot.setData(x=[],y=[])
-        self.pupilEllipsePlot.setData(x=[],y=[])
-            
     def setPupilSign(self):
         if self.mainWin.sender() is self.trackMenuPupilSignNeg:
             self.trackMenuPupilSignNeg.setChecked(True)
@@ -1332,6 +1324,22 @@ class MouseEyeTracker():
         self.pupilCenterSeed = None
         self.pupilCenterPlot.setData(x=[],y=[])
         self.pupilEllipsePlot.setData(x=[],y=[])
+        
+    def setPupilTrackMethod(self):
+        methods = (self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients) 
+        params = (self.trackMenuCircularity,self.trackMenuLineOrigin,self.trackMenuGradientDownsamp)
+        for m,p in zip(methods,params):
+            isSelected = m is self.mainWin.sender()
+            m.setChecked(isSelected)
+            p.setEnabled(isSelected)
+        self.pupilCenterSeed = None
+        self.pupilCenterPlot.setData(x=[],y=[])
+        self.pupilEllipsePlot.setData(x=[],y=[])
+        
+    def setCircularityThresh(self):
+        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set pupil circularity threshold','ellipse axis length ratio:',value=self.pupilCircularityThresh,min=0.01,max=0.99,decimals=2)
+        if ok:
+            self.pupilCircularityThresh = val
         
     def setPupilEdgeLineOrigin(self):
         if self.mainWin.sender() is self.trackMenuLineOriginLeft:
@@ -1470,8 +1478,8 @@ class MouseEyeTracker():
             self.pupilEdgePtsPlot.setData(self.pupilEdges)
             if self.pupilEdges.shape[0]>0:
                 self.edgeDistPlot.setData(x=np.arange(self.pupilEdgeDist.size)+1,y=self.pupilEdgeDist)
-                self.edgeDistUpperThreshLine.setValue(self.pupilEdgeDist.mean()+self.edgeDistThreshOffset+self.edgeDistThreshFactor*self.pupilEdgeDist.std())
-                self.edgeDistLowerThreshLine.setValue(self.pupilEdgeDist.mean()+self.edgeDistThreshOffset-self.edgeDistThreshFactor*self.pupilEdgeDist.std())
+                self.edgeDistUpperThreshLine.setValue(self.pupilEdgeDist.mean()+self.edgeDistThresh[1]*self.pupilEdgeDist.std())
+                self.edgeDistLowerThreshLine.setValue(self.pupilEdgeDist.mean()+self.edgeDistThresh[0]*self.pupilEdgeDist.std())
                 self.pupilYPlotItem.setRange(xRange=(1,self.pupilEdgeDist.size),yRange=(0,max(np.append(self.pupilEdgeDist,self.edgeDistUpperThreshLine.value()))))
                 self.pupilYPlotItem.getAxis('left').setTickSpacing(levels=[(self.getTickSpacing(self.pupilEdgeDist.mean()*2),0)])
                 self.pupilYPlotItem.getAxis('bottom').setTickSpacing(levels=[(self.getTickSpacing(self.pupilEdges.shape[0]),0)])
@@ -1504,8 +1512,7 @@ class MouseEyeTracker():
         lowerThresh = self.edgeDistLowerThreshLine.value()
         if lowerThresh>meanEdgeDist:
             lowerThresh = math.floor(0.8*meanEdgeDist)
-        self.edgeDistThreshOffset = lowerThresh+(upperThresh-lowerThresh)/2-meanEdgeDist
-        self.edgeDistThreshFactor = (upperThresh-lowerThresh)/2/self.pupilEdgeDist.std()
+        self.edgeDistThresh = (np.array([lowerThresh,upperThresh])-meanEdgeDist)/self.pupilEdgeDist.std()
         self.trackPupil()
         self.updatePupilPlot()
         self.updatePupilTrackParamPlots()
@@ -1689,15 +1696,18 @@ class MouseEyeTracker():
                 self.updateDisplay(updateNone=True)
                 
     def loadTrackingData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenPath,'*.hdf5')
+        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.hdf5')
         if filePath=='':
             return
-        self.fileOpenPath = os.path.dirname(filePath)
+        self.fileOpenSavePath = os.path.dirname(filePath)
         dataFile = h5py.File(filePath,'r')
+        if 'mmPerPixel' in dataFile.attrs.keys():
+            self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
         for param in set(dataFile.keys()) & set(('reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')):
             setattr(self,param,dataFile[param][:])
         if self.dataFileIn is not None:
             self.frameTimes = dataFile['frameTimes'][:]
+        dataFile.close()
         self.dataIsLoaded = True
         self.pupilAreaRange = [self.pupilArea[self.frameNum-1]]*2
         self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
@@ -1736,8 +1746,9 @@ class MouseEyeTracker():
     def findSaccades(self):
         # find peaks in pupil velocity
         vel,t = self.getPupilVelocity()
-        self.negSaccades = np.where((vel<np.nanmin(vel)*self.saccadeThresh) & np.concatenate(([False],vel[1:]<vel[:-1])) & np.concatenate((vel[:-1]<vel[1:],[False])))[0]
-        self.posSaccades = np.where((vel>np.nanmax(vel)*self.saccadeThresh) & np.concatenate(([False],vel[1:]>vel[:-1])) & np.concatenate((vel[:-1]>vel[1:],[False])))[0]
+        thresh = self.saccadeThresh*np.nanstd(vel)
+        self.negSaccades = np.where((vel<-thresh) & np.concatenate(([False],vel[1:]<vel[:-1])) & np.concatenate((vel[:-1]<vel[1:],[False])))[0]
+        self.posSaccades = np.where((vel>thresh) & np.concatenate(([False],vel[1:]>vel[:-1])) & np.concatenate((vel[:-1]>vel[1:],[False])))[0]
         # remove peaks that are too close in time
         self.negSaccades = self.negSaccades[np.concatenate(([True],np.diff(t[self.negSaccades])>self.saccadeRefractoryPeriod))]
         self.posSaccades = self.posSaccades[np.concatenate(([True],np.diff(t[self.posSaccades])>self.saccadeRefractoryPeriod))]
@@ -1785,7 +1796,7 @@ class MouseEyeTracker():
             self.saccadeSmoothPts = val
         
     def setSaccadeThresh(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Saccade Threshold','fraction of peak:',value=self.saccadeThresh,min=0.01,max=0.99,decimals=2)
+        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Saccade Threshold','standard devations from baseline:',value=self.saccadeThresh,min=0.1,decimals=1)
         if ok:
             self.saccadeThresh = val
             
