@@ -85,7 +85,7 @@ class MouseEyeTracker():
         self.menuBar.setNativeMenuBar(False)
         self.fileMenu = self.menuBar.addMenu('File')
         self.fileMenuOpen = QtGui.QAction('Open',self.mainWin)
-        self.fileMenuOpen.triggered.connect(self.loadFrameData)
+        self.fileMenuOpen.triggered.connect(self.loadVideoData)
         self.fileMenu.addAction(self.fileMenuOpen)
         
         self.fileMenuSave = self.fileMenu.addMenu('Save')
@@ -427,7 +427,7 @@ class MouseEyeTracker():
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
                
-    def loadFrameData(self):
+    def loadVideoData(self):
         filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
         if filePath=='':
             return
@@ -447,7 +447,8 @@ class MouseEyeTracker():
             else:
                 self.numFrames = sum(1 for _ in self.dataFileIn.keys())
             self.frameTimes = np.full(self.numFrames,np.nan)
-            self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
+            if 'mmPerPixel' in self.dataFileIn.attrs.keys():
+                self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
             self.analysisMenuFrameIntervals.setEnabled(True)
         else:
             self.video = cv2.VideoCapture(filePath)
@@ -856,14 +857,15 @@ class MouseEyeTracker():
         modifiers = QtGui.QApplication.keyboardModifiers()
         if key in (QtCore.Qt.Key_Comma,QtCore.Qt.Key_Period):
             if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                frameShift = int(0.9*self.numDataPlotPts) if int(modifiers & QtCore.Qt.ControlModifier)>0 else 1
                 if key==QtCore.Qt.Key_Comma:
-                    if self.frameNum==1:
-                        return
-                    self.frameNum -= 1
+                    self.frameNum -= frameShift
+                    if self.frameNum<1:
+                        self.frameNum = 1
                 else:
-                    if self.frameNum==self.numFrames:
-                        return
-                    self.frameNum += 1
+                    self.frameNum += frameShift
+                    if self.frameNum>self.numFrames:
+                        self.frameNum = self.numFrames
                 self.frameNumSpinBox.setValue(self.frameNum)
         elif key==QtCore.Qt.Key_N:
             if int(modifiers & QtCore.Qt.ControlModifier)>0:
@@ -1780,7 +1782,11 @@ class MouseEyeTracker():
     def getSaccadesOnDisplay(self):
         saccades = np.sort(np.concatenate((self.negSaccades,self.posSaccades)))
         if saccades.size>0:
-            saccades = saccades[np.logical_and(saccades>self.frameNum-self.numDataPlotPts,saccades<self.frameNum)]
+            if self.frameNum>self.numDataPlotPts:
+                onDisplay = np.logical_and(saccades>self.frameNum-self.numDataPlotPts,saccades<self.frameNum)
+            else:
+                onDisplay = saccades<self.numDataPlotPts
+            saccades = saccades[onDisplay]
         return saccades
     
     def deleteAllSaccades(self):
