@@ -10,7 +10,8 @@ import sip
 sip.setapi('QString', 2)
 import os, copy, time, math, cv2, h5py
 import numpy as np
-from scipy import signal
+import scipy.io
+import scipy.signal
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
 from matplotlib import pyplot as plt
@@ -85,18 +86,24 @@ class MouseEyeTracker():
         self.menuBar.setNativeMenuBar(False)
         self.fileMenu = self.menuBar.addMenu('File')
         self.fileMenuOpen = QtGui.QAction('Open',self.mainWin)
-        self.fileMenuOpen.triggered.connect(self.loadVideoData)
+        self.fileMenuOpen.triggered.connect(self.loadFrameData)
         self.fileMenu.addAction(self.fileMenuOpen)
         
         self.fileMenuSave = self.fileMenu.addMenu('Save')
         self.fileMenuSave.setEnabled(False)
-        self.fileMenuSaveHDF5 = QtGui.QAction('HDF5',self.mainWin)
-        self.fileMenuSaveHDF5.triggered.connect(self.saveHDF5)
+        self.fileMenuSaveData = self.fileMenuSave.addMenu('Data')
+        self.fileMenuSaveDataHdf5 = QtGui.QAction('hdf5',self.mainWin)
+        self.fileMenuSaveDataHdf5.triggered.connect(self.saveData)
+        self.fileMenuSaveDataNpz = QtGui.QAction('npz',self.mainWin)
+        self.fileMenuSaveDataNpz.triggered.connect(self.saveData)
+        self.fileMenuSaveDataMat = QtGui.QAction('mat',self.mainWin)
+        self.fileMenuSaveDataMat.triggered.connect(self.saveData)
+        self.fileMenuSaveData.addActions([self.fileMenuSaveDataHdf5,self.fileMenuSaveDataNpz,self.fileMenuSaveDataMat])
         self.fileMenuSaveMovie = QtGui.QAction('Movie',self.mainWin)
         self.fileMenuSaveMovie.triggered.connect(self.saveMovie)
         self.fileMenuSaveAnnotatedMovie = QtGui.QAction('Annotated Movie',self.mainWin,enabled=False)
-        self.fileMenuSaveAnnotatedMovie.triggered.connect(self.saveAnnotatedMovie)
-        self.fileMenuSave.addActions([self.fileMenuSaveHDF5,self.fileMenuSaveMovie,self.fileMenuSaveAnnotatedMovie])
+        self.fileMenuSaveAnnotatedMovie.triggered.connect(self.saveMovie)
+        self.fileMenuSave.addActions([self.fileMenuSaveMovie,self.fileMenuSaveAnnotatedMovie])
         
         # camera menu
         self.cameraMenu = self.menuBar.addMenu('Camera')         
@@ -381,19 +388,34 @@ class MouseEyeTracker():
             self.nidaqDigOutputs.ClearTask()
         event.accept()
         
-    def saveHDF5(self):
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.hdf5')
+    def saveData(self):
+        if self.mainWin.sender()==self.fileMenuSaveDataHdf5:
+            fileType = 'hdf5'
+        elif self.mainWin.sender()==self.fileMenuSaveDataNpz:
+            fileType = 'npz'
+        else:
+            fileType = 'mat'
+        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.'+fileType)
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        dataFile = h5py.File(filePath,'w',libver='latest')
-        dataFile.attrs.create('mmPerPixel',self.mmPerPixel)
-        for param in ('reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades'):
-            dataFile.create_dataset(param,data=getattr(self,param),compression='gzip',compression_opts=1)
+        self.reflectCenter += self.roiPos
+        self.pupilCenter += self.roiPos
+        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
         if self.dataFileIn is not None:
             self.getFrameTimes()
-            dataFile.create_dataset('frameTimes',data=self.frameTimes,compression='gzip',compression_opts=1)
-        dataFile.close()
+        if fileType=='hdf5':
+            dataFile = h5py.File(filePath,'w',libver='latest')
+            dataFile.attrs.create('mmPerPixel',self.mmPerPixel)
+            for param in params[1:]:
+                dataFile.create_dataset(param,data=getattr(self,param),compression='gzip',compression_opts=1)
+            dataFile.close()
+        else:
+            data = {param: getattr(self,param) for param in params}
+            if fileType=='npz':
+                np.savez_compressed(filePath,**data)
+            else:
+                scipy.io.savemat(filePath,data,do_compression=True)
         
     def saveMovie(self):
         filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
@@ -420,14 +442,8 @@ class MouseEyeTracker():
         vidOut.release()
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
-        
-    def saveAnnotatedMovie(self):
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
-        if filePath=='':
-            return
-        self.fileOpenSavePath = os.path.dirname(filePath)
                
-    def loadVideoData(self):
+    def loadFrameData(self):
         filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
         if filePath=='':
             return
@@ -446,14 +462,13 @@ class MouseEyeTracker():
                 self.numFrames = self.dataFileIn.attrs.get('numFrames')
             else:
                 self.numFrames = sum(1 for _ in self.dataFileIn.keys())
-            self.frameTimes = np.full(self.numFrames,np.nan)
             if 'mmPerPixel' in self.dataFileIn.attrs.keys():
                 self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
-            self.analysisMenuFrameIntervals.setEnabled(True)
         else:
             self.video = cv2.VideoCapture(filePath)
             self.frameRate = self.video.get(cv2.CAP_PROP_FPS)
             self.numFrames = int(round(self.video.get(cv2.CAP_PROP_FRAME_COUNT)))
+        self.frameTimes = np.full(self.numFrames,np.nan)
         if self.defaultDataPlotDur>self.numFrames/self.frameRate:
             self.dataPlotDur = self.numFrames/self.frameRate
         else:
@@ -475,9 +490,7 @@ class MouseEyeTracker():
         
     def closeDataFileIn(self):
         self.closeFileCleanup()
-        self.analysisMenuFrameIntervals.setEnabled(False)
         self.dataIsLoaded = False
-        self.frameTimes = []
         self.dataFileIn.close()
         self.dataFileIn = None
         
@@ -498,6 +511,7 @@ class MouseEyeTracker():
         self.removeFrameNumLines()
         for line in self.frameNumLines:
             line.setValue(0)
+        self.frameTimes = []
         self.resetPupilTracking()
         self.deleteAllSaccades()
        
@@ -1012,6 +1026,8 @@ class MouseEyeTracker():
                 self.roi.setPos((0,0))
                 self.roi.setSize(self.fullRoiSize)
                 self.roi.setVisible(True)
+            self.pupilCenter += self.roiPos
+            self.reflectCenter += self.roiPos
             if self.pupilCenterSeed is not None:
                 self.pupilCenterSeed = (self.pupilCenterSeed[0]+self.roiPos[0],self.pupilCenterSeed[1]+self.roiPos[1])
             if self.reflectCenterSeed is not None:
@@ -1031,6 +1047,8 @@ class MouseEyeTracker():
         else:
             self.roiPos = [int(n) for n in self.roi.pos()]
             self.roiSize = [int(n) for n in self.roi.size()]
+            self.pupilCenter -= self.roiPos
+            self.reflectCenter -= self.roiPos
             if self.pupilCenterSeed is not None:
                 self.pupilCenterSeed = (self.pupilCenterSeed[0]-self.roiPos[0],self.pupilCenterSeed[1]-self.roiPos[1])
             if self.reflectCenterSeed is not None:
@@ -1557,7 +1575,7 @@ class MouseEyeTracker():
                 else:
                     return
             else:
-                y,x = np.unravel_index(np.argmax(signal.fftconvolve(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]],self.reflectTemplate,mode='same')),roiSize)          
+                y,x = np.unravel_index(np.argmax(scipy.signal.fftconvolve(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]],self.reflectTemplate,mode='same')),roiSize)          
                 center = (roiPos[0]+x,roiPos[1]+y)
                 if any((center[i]-roiSize[i]<0 or center[i]+roiSize[i]>self.roiSize[i]-1 for i in [0,1])):
                     return
@@ -1698,19 +1716,26 @@ class MouseEyeTracker():
                 self.updateDisplay(updateNone=True)
                 
     def loadTrackingData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.hdf5')
+        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        dataFile = h5py.File(filePath,'r')
-        if 'mmPerPixel' in dataFile.attrs.keys():
-            self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
-        for param in set(dataFile.keys()) & set(('reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')):
-            setattr(self,param,dataFile[param][:])
-        if self.dataFileIn is not None:
-            self.frameTimes = dataFile['frameTimes'][:]
-        dataFile.close()
+        fileType = os.path.splitext(filePath)[1][1:]
+        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
+        if fileType=='hdf5':
+            dataFile = h5py.File(filePath,'r')
+            if 'mmPerPixel' in dataFile.attrs.keys():
+                self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
+            for param in set(dataFile.keys()) & set(params[1:]):
+                setattr(self,param,dataFile[param][:])
+            dataFile.close()
+        else:
+            data = np.load(filePath) if fileType=='npz' else scipy.io.loadmat(filePath,squeeze_me=True)
+            for param in set(data.keys()) & set(params):
+                setattr(self,param,data[param])
         self.dataIsLoaded = True
+        self.reflectCenter -= self.roiPos
+        self.pupilCenter -= self.roiPos
         self.pupilAreaRange = [self.pupilArea[self.frameNum-1]]*2
         self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
         self.pupilYRange = [self.pupilY[self.frameNum-1]]*2
@@ -1731,6 +1756,8 @@ class MouseEyeTracker():
         self.updatePupilDataPlot()
     
     def plotFrameIntervals(self):
+        if all(np.isnan(self.frameTimes)):
+            return
         self.getFrameTimes()
         frameIntervals = np.diff(self.frameTimes)*1e3
         plt.figure()
@@ -1755,14 +1782,14 @@ class MouseEyeTracker():
         self.negSaccades = self.negSaccades[np.concatenate(([True],np.diff(t[self.negSaccades])>self.saccadeRefractoryPeriod))]
         self.posSaccades = self.posSaccades[np.concatenate(([True],np.diff(t[self.posSaccades])>self.saccadeRefractoryPeriod))]
         # remove negative peaks too closely following positive peaks and vice versa
-        peakTimeDiff = self.frameTimes[self.negSaccades]-t[self.posSaccades][:,None]
+        peakTimeDiff = t[self.negSaccades]-t[self.posSaccades][:,None]
         self.negSaccades = self.negSaccades[np.all(np.logical_or(peakTimeDiff<0,peakTimeDiff>self.saccadeRefractoryPeriod),axis=0)]
         self.posSaccades = self.posSaccades[np.all(np.logical_or(peakTimeDiff>0,peakTimeDiff<-self.saccadeRefractoryPeriod),axis=1)]
         self.selectedSaccade = None
         self.plotSaccades()
         
     def getPupilVelocity(self):
-        if self.dataFileIn is None:
+        if all(np.isnan(self.frameTimes)):
             t = np.arange(self.numFrames)/self.frameRate
         else:
             self.getFrameTimes()
