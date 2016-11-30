@@ -17,15 +17,33 @@ import pyqtgraph as pg
 from matplotlib import pyplot as plt
 
 
+class QtSignalGenerator(QtCore.QObject):
+
+    camFrameCapturedSignal = QtCore.pyqtSignal(np.ndarray,float)
+    
+    def __init__(self):
+        QtCore.QObject.__init__(self)
+
+
+qtSignalGeneratorObj = QtSignalGenerator()
+
+
 def start():
     app = QtGui.QApplication.instance()
     if app is None:
         app = QtGui.QApplication([])
-    w = MouseEyeTracker(app)
+    eyeTrackerObj = EyeTracker(app)
+    qtSignalGeneratorObj.camFrameCapturedSignal.connect(eyeTrackerObj.processCamFrame)
     app.exec_()
+    
+
+def camFrameCaptured(frame):
+    img = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width))
+    qtSignalGeneratorObj.camFrameCapturedSignal.emit(img,frame._frame.timestamp)
+    frame.queueFrameCapture(frameCallback=camFrameCaptured)
 
 
-class MouseEyeTracker():
+class EyeTracker():
     
     def __init__(self,app):
         self.app = app
@@ -35,7 +53,7 @@ class MouseEyeTracker():
         self.nidaq = False
         self.vimba = None
         self.cam = None
-        self.frame = None
+        self.camFrames = []
         self.video = None
         self.dataFileIn = None
         self.dataFileOut = None
@@ -63,10 +81,6 @@ class MouseEyeTracker():
         self.saccadeSmoothPts = 3
         self.saccadeThresh = 5
         self.saccadeRefractoryPeriod = 0.1
-        
-        # signal generator object
-        self.sigGen = SignalGenerator()
-        self.sigGen.camFrameCapturedSignal.connect(self.processCamFrame)
         
         # main window
         winWidth = 1000
@@ -113,13 +127,15 @@ class MouseEyeTracker():
         
         self.cameraMenuSettings = self.cameraMenu.addMenu('Settings')
         self.cameraMenuSettings.setEnabled(False)
+        self.cameraMenuSettingsBufferSize = QtGui.QAction('Buffer Size',self.mainWin)
+        self.cameraMenuSettingsBufferSize.triggered.connect(self.setCamBufferSize)
         self.cameraMenuSettingsBinning = QtGui.QAction('Spatial Binning',self.mainWin)
         self.cameraMenuSettingsBinning.triggered.connect(self.setCamBinning)
         self.cameraMenuSettingsExposure = QtGui.QAction('Exposure',self.mainWin)
         self.cameraMenuSettingsExposure.triggered.connect(self.setCamExposure)
         self.cameraMenuSettingsFrameRate = QtGui.QAction('Frame Rate',self.mainWin)
         self.cameraMenuSettingsFrameRate.triggered.connect(self.setCamFrameRate)
-        self.cameraMenuSettings.addActions([self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure,self.cameraMenuSettingsFrameRate])
+        self.cameraMenuSettings.addActions([self.cameraMenuSettingsBufferSize,self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure,self.cameraMenuSettingsFrameRate])
         
         self.cameraMenuNidaq = self.cameraMenu.addMenu('NIDAQ IO')
         self.cameraMenuNidaq.setEnabled(False)
@@ -418,25 +434,27 @@ class MouseEyeTracker():
                 scipy.io.savemat(filePath,data,do_compression=True)
         
     def saveMovie(self):
+        startFrame,endFrame = (self.frameNum-self.numDataPlotPts,self.frameNum) if self.frameNum>self.numDataPlotPts else (1,self.numDataPlotPts)
+        text,ok = QtGui.QInputDialog.getText(self.mainWin,'Save Movie','Enter frames range:',text=str(startFrame)+'-'+str(endFrame))
+        if not ok:
+            return
+        startFrame,endFrame = [int(n) for n in text.split('-')]
+        if startFrame<1:
+            startFrame = 1
+        if endFrame>self.numFrames:
+            endFrame = self.numFrames
         filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
         vidOut = cv2.VideoWriter(filePath,-1,self.frameRate,self.roiSize)
         if self.dataFileIn is None:
-            self.video.set(cv2.CAP_PROP_POS_FRAMES,0)
-        else:
-            frame = 0
-        while True:
+            self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
+        for frame in range(startFrame,endFrame+1):
             if self.dataFileIn is None:
                 isImage,image = self.video.read()
-                if not isImage:
-                    break
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
-                frame += 1
-                if frame==len(self.dataFileIn.keys()):
-                    break
                 image = self.dataFileIn[str(frame)][:,:]
             vidOut.write(image[self.roiInd])
         vidOut.release()
@@ -569,38 +587,42 @@ class MouseEyeTracker():
         self.saveCheckBox.setEnabled(False)
         self.resetPupilTracking()
         
-    def getCamImage(self):
-        self.startCamera()
-        self.frame.queueFrameCapture()
-        self.cam.runFeatureCommand("AcquisitionStart")
-        self.frame.waitFrameCapture()
-        self.image = np.ndarray(buffer=self.frame.getBufferByteData(),dtype=np.uint8,shape=(self.frame.height,self.frame.width,1)).squeeze()
-        self.stopCamera()
-        
-    def startCamera(self):
+    def startCamera(self,bufferSize=1):
         self.cameraMenuSettings.setEnabled(False)
         if self.nidaq:
             self.nidaqDigInputs.StartTask()
             self.nidaqDigOutputs.StartTask()
             self.nidaqDigOutputs.Write(np.zeros(self.nidaqDigOutputs.deviceLines,dtype=np.uint8))
-        self.frame = self.cam.getFrame()
-        self.frame.announceFrame()
+        for _ in range(bufferSize):
+            frame = self.cam.getFrame()
+            frame.announceFrame()
+            self.camFrames.append(frame)
         self.cam.startCapture()
         
     def stopCamera(self):
         self.cam.runFeatureCommand("AcquisitionStop")
         self.cam.endCapture()
         self.cam.revokeAllFrames()
-        self.frame = None
+        self.camFrames = []
         if self.dataFileOut is not None:
             self.closeDataFileOut()
         if self.nidaq:
             self.nidaqDigInputs.StopTask()
             self.nidaqDigOutputs.StopTask()
         self.cameraMenuSettings.setEnabled(True)
+        
+    def getCamImage(self):
+        self.startCamera()
+        frame = self.camFrames[0]
+        frame.queueFrameCapture()
+        self.cam.runFeatureCommand("AcquisitionStart")
+        frame.waitFrameCapture()
+        self.image = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width))
+        self.stopCamera()
             
     def setCamProps(self):
         self.frameRate = 60.0
+        self.camBufferSize = 60
         self.camExposure = 0.9
         self.cam.PixelFormat='Mono8'
         self.cam.BinningHorizontal = 1
@@ -618,6 +640,12 @@ class MouseEyeTracker():
         self.cam.SyncOutSelector = 'SyncOut2'
         self.cam.SyncOutSource = 'Exposing'
         self.cam.SyncOutPolarity = 'Normal'
+        
+    def setCamBufferSize(self):
+        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
+        if not ok:
+            return
+        self.camBufferSize = val
             
     def setCamBinning(self):
         val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.cam.BinningHorizontal,min=1,max=8)
@@ -773,8 +801,9 @@ class MouseEyeTracker():
             else:
                 self.frameNum = 0
                 self.resetPupilData()
-                self.startCamera()
-                self.frame.queueFrameCapture(frameCallback=self.camFrameCaptured)
+                self.startCamera(bufferSize=self.camBufferSize)
+                for frame in self.camFrames:
+                    frame.queueFrameCapture(frameCallback=camFrameCaptured)
                 self.cam.runFeatureCommand("AcquisitionStart")
         else:
             if self.cam is not None:
@@ -813,11 +842,6 @@ class MouseEyeTracker():
                 updatePlotN = [False,False,False]
                 updatePlotN[n-2] = True
                 self.updatePupilDataPlot(updatePlotN)
-            
-    def camFrameCaptured(self,frame):
-        img = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width,1)).squeeze()
-        self.sigGen.camFrameCapturedSignal.emit(img,frame._frame.timestamp)
-        frame.queueFrameCapture(frameCallback=self.camFrameCaptured)
         
     def processCamFrame(self,img,timestamp):
         self.frameNum += 1
@@ -1837,14 +1861,6 @@ class MouseEyeTracker():
         val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Saccade Refractory Period','seconds:',value=self.saccadeRefractoryPeriod,min=0.001,decimals=3)
         if ok:
             self.saccadeRefractoryPeriod = val
-        
-        
-class SignalGenerator(QtCore.QObject):
-
-    camFrameCapturedSignal = QtCore.pyqtSignal(np.ndarray,float)
-    
-    def __init__(self):
-        QtCore.QObject.__init__(self)
         
 
 if __name__=="__main__":
