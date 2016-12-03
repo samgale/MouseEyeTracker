@@ -25,7 +25,15 @@ class QtSignalGenerator(QtCore.QObject):
         QtCore.QObject.__init__(self)
 
 
+# frame captured callback must be thread safe, hence
+# signal generator is used to send frame data to gui thread
 qtSignalGeneratorObj = QtSignalGenerator()
+
+
+def camFrameCaptured(frame):
+    img = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width))
+    qtSignalGeneratorObj.camFrameCapturedSignal.emit(img,frame._frame.timestamp)
+    frame.queueFrameCapture(frameCallback=camFrameCaptured)
 
 
 def start():
@@ -35,12 +43,6 @@ def start():
     eyeTrackerObj = EyeTracker(app)
     qtSignalGeneratorObj.camFrameCapturedSignal.connect(eyeTrackerObj.processCamFrame)
     app.exec_()
-    
-
-def camFrameCaptured(frame):
-    img = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width))
-    qtSignalGeneratorObj.camFrameCapturedSignal.emit(img,frame._frame.timestamp)
-    frame.queueFrameCapture(frameCallback=camFrameCaptured)
 
 
 class EyeTracker():
