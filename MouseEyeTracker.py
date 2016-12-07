@@ -155,6 +155,7 @@ class EyeTracker():
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
+        self.trackMenu.setEnabled(False)
         self.trackMenuStopTracking = QtGui.QAction('Stop Tracking',self.mainWin,checkable=True)
         self.trackMenuStopTracking.triggered.connect(self.setStopTracking)
         self.trackMenu.addAction(self.trackMenuStopTracking)
@@ -195,9 +196,11 @@ class EyeTracker():
         self.trackMenuPupilMethodGradients.triggered.connect(self.setPupilTrackMethod)
         self.trackMenuPupilMethod.addActions([self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients])
         
+        self.trackMenuAdaptThresh = QtGui.QAction('Adaptive Threshold',self.mainWin,checkable=True)
+        self.trackMenuAdaptThresh.triggered.connect(self.setAdaptiveThreshold)
         self.trackMenuCircularity = QtGui.QAction('Circularity',self.mainWin)
         self.trackMenuCircularity.triggered.connect(self.setCircularityThresh)
-        self.trackMenu.addAction(self.trackMenuCircularity)
+        self.trackMenu.addActions([self.trackMenuAdaptThresh,self.trackMenuCircularity])        
         
         self.trackMenuLineOrigin = self.trackMenu.addMenu('Line Origin')
         self.trackMenuLineOrigin.setEnabled(False)
@@ -724,6 +727,7 @@ class EyeTracker():
         self.resetPupilData()
         self.resetPupilDataPlot()        
         self.setDataPlotXRange()
+        self.trackMenu.setEnabled(True)
                
     def resetROI(self):
         if self.cam is not None:
@@ -844,6 +848,8 @@ class EyeTracker():
                 updatePlotN = [False,False,False]
                 updatePlotN[n-2] = True
                 self.updatePupilDataPlot(updatePlotN)
+        if self.trackMenuAdaptThresh.isChecked():
+            self.meanImageIntensity = self.image.mean()
         
     def processCamFrame(self,img,timestamp):
         self.frameNum += 1
@@ -1197,20 +1203,21 @@ class EyeTracker():
                 
     def trackPupil(self):
         self.pupilFound = False
-        if not self.setDataNan:
+        if not self.setDataNan and (self.reflectCenterSeed is None or self.reflectFound):
             img = self.image[self.roiInd].copy()
             if self.trackMenuPupilSignPos.isChecked():
                 img = 255-img
             if self.useMaskCheckBox.isChecked() and len(self.maskRoi)>0:
                 for ind in self.maskIndex:
                     img[ind] = 0
-            if self.reflectCenterSeed is None or self.reflectFound:
-                if self.trackMenuPupilMethodStarburst.isChecked():
-                    self.findPupilWithStarburst(img)
-                elif self.trackMenuPupilMethodLine.isChecked():
-                    self.findPupilWithLine(img)
-                else:
-                    self.findPupilWithGradients(img)
+            if self.trackMenuAdaptThresh.isChecked():
+                self.pupilEdgeThresh += self.image.mean()-self.meanImageIntensity
+            if self.trackMenuPupilMethodStarburst.isChecked():
+                self.findPupilWithStarburst(img)
+            elif self.trackMenuPupilMethodLine.isChecked():
+                self.findPupilWithLine(img)
+            else:
+                self.findPupilWithGradients(img)
         self.updatePupilData()
         
     def findPupilWithStarburst(self,img):
@@ -1374,13 +1381,16 @@ class EyeTracker():
     def setPupilTrackMethod(self):
         methods = (self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients) 
         params = (self.trackMenuCircularity,self.trackMenuLineOrigin,self.trackMenuGradientDownsamp)
-        for m,p in zip(methods,params):
-            isSelected = m is self.mainWin.sender()
-            m.setChecked(isSelected)
-            p.setEnabled(isSelected)
+        for method,param in zip(methods,params):
+            isSelected = method is self.mainWin.sender()
+            method.setChecked(isSelected)
+            param.setEnabled(isSelected)
         self.pupilCenterSeed = None
         self.pupilCenterPlot.setData(x=[],y=[])
         self.pupilEllipsePlot.setData(x=[],y=[])
+        
+    def setAdaptiveThreshold(self):
+        self.meanImageIntensity = self.image.mean()
         
     def setCircularityThresh(self):
         val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set pupil circularity threshold','ellipse axis length ratio:',value=self.pupilCircularityThresh,min=0.01,max=0.99,decimals=2)
