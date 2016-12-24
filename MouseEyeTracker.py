@@ -8,7 +8,7 @@ Acquire data with camera or analyze data from hdf5 or video file
 
 import sip
 sip.setapi('QString', 2)
-import os, copy, time, math, cv2, h5py
+import os, time, math, cv2, h5py
 import numpy as np
 import scipy.io
 import scipy.signal
@@ -25,7 +25,7 @@ class QtSignalGenerator(QtCore.QObject):
         QtCore.QObject.__init__(self)
 
 
-# frame captured callback must be thread safe, hence
+# frame captured callback must be thread safe
 # signal generator is used to send frame data to gui thread
 qtSignalGeneratorObj = QtSignalGenerator()
 
@@ -50,7 +50,7 @@ class EyeTracker():
     def __init__(self,app):
         self.app = app
         self.fileOpenSavePath = os.path.dirname(os.path.realpath(__file__))
-        self.camSavePath = copy.copy(self.fileOpenSavePath)
+        self.camSavePath = self.fileOpenSavePath
         self.camSaveBaseName = 'MouseEyeTracker'
         self.nidaq = False
         self.vimba = None
@@ -738,7 +738,7 @@ class EyeTracker():
             self.getCamImage()
         self.roiPos = (0,0)
         self.roiSize = (self.image.shape[1],self.image.shape[0])
-        self.fullRoiSize = copy.copy(self.roiSize)
+        self.fullRoiSize = (self.image.shape[1],self.image.shape[0])
         self.roiInd = np.s_[0:self.roiSize[1],0:self.roiSize[0]]
         
     def resetImage(self):
@@ -916,6 +916,8 @@ class EyeTracker():
         elif key==QtCore.Qt.Key_N:
             if int(modifiers & QtCore.Qt.ControlModifier)>0:
                 self.setDataNan = not self.setDataNan
+                if self.setDataNan:
+                    self.setCurrentFrameDataNan()
             elif self.cam is None and not any([button.isChecked() for button in self.buttons]):
                 self.setCurrentFrameDataNan()
         elif key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right,QtCore.Qt.Key_Up,QtCore.Qt.Key_Down,QtCore.Qt.Key_Minus,QtCore.Qt.Key_Equal):
