@@ -351,15 +351,12 @@ class EyeTracker():
         self.frameNumSpinBox.blockSignals(True)
         
         self.pupilAreaFrameNumLine = pg.InfiniteLine(pos=0,pen='r',movable=True,bounds=(0,1))
-        self.pupilAreaFrameNumLine.sigDragged.connect(self.frameNumLineDragged)
-        self.pupilAreaFrameNumLine.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)
         self.pupilXFrameNumLine = pg.InfiniteLine(pos=0,pen='r',movable=True,bounds=(0,1))
-        self.pupilXFrameNumLine.sigDragged.connect(self.frameNumLineDragged)
-        self.pupilXFrameNumLine.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)
         self.pupilYFrameNumLine = pg.InfiniteLine(pos=0,pen='r',movable=True,bounds=(0,1))
-        self.pupilYFrameNumLine.sigDragged.connect(self.frameNumLineDragged)
-        self.pupilYFrameNumLine.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)
         self.frameNumLines = (self.pupilAreaFrameNumLine,self.pupilXFrameNumLine,self.pupilYFrameNumLine)
+        for line in self.frameNumLines:
+            line.sigDragged.connect(self.frameNumLineDragged)
+            line.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)    
         
         # data plot duration control
         self.plotDurLayout = QtGui.QFormLayout()
@@ -569,7 +566,7 @@ class EyeTracker():
                     self.cameraMenuNidaqOut.setChecked(True)
                     self.nidaq = True
                 except:
-                    print('Unable to import/use nidaq')
+                    raise Warning('Unable to import/use nidaq')
             self.cam.openCamera()
             self.setCamProps()
             self.dataPlotDur = self.defaultDataPlotDur
