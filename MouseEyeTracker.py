@@ -101,9 +101,12 @@ class EyeTracker():
         self.menuBar = self.mainWin.menuBar()
         self.menuBar.setNativeMenuBar(False)
         self.fileMenu = self.menuBar.addMenu('File')
-        self.fileMenuOpen = QtGui.QAction('Open',self.mainWin)
-        self.fileMenuOpen.triggered.connect(self.loadFrameData)
-        self.fileMenu.addAction(self.fileMenuOpen)
+        self.fileMenuOpen = self.fileMenu.addMenu('Open')
+        self.fileMenuOpenFrames = QtGui.QAction('Frame Data',self.mainWin)
+        self.fileMenuOpenFrames.triggered.connect(self.loadFrameData)
+        self.fileMenuOpenData = QtGui.QAction('Tracking Data',self.mainWin)
+        self.fileMenuOpenData.triggered.connect(self.loadTrackingData)
+        self.fileMenuOpen.addActions([self.fileMenuOpenFrames,self.fileMenuOpenData])
         
         self.fileMenuSave = self.fileMenu.addMenu('Save')
         self.fileMenuSave.setEnabled(False)
@@ -225,13 +228,11 @@ class EyeTracker():
         self.analysisMenuConvertDegToPix.triggered.connect(self.degToPix)
         self.analysisMenuConvert.addActions([self.analysisMenuConvertPixToDeg,self.analysisMenuConvertDegToPix])
         
-        self.analysisMenuLoadData = QtGui.QAction('Load Tracking Data',self.mainWin)
-        self.analysisMenuLoadData.triggered.connect(self.loadTrackingData)
         self.analysisMenuAnalyzeAll = QtGui.QAction('Analyze All Frames',self.mainWin)
         self.analysisMenuAnalyzeAll.triggered.connect(self.analyzeAllFrames)
         self.analysisMenuFrameIntervals = QtGui.QAction('Plot Frame Intervals',self.mainWin)
         self.analysisMenuFrameIntervals.triggered.connect(self.plotFrameIntervals)
-        self.analysisMenu.addActions([self.analysisMenuLoadData,self.analysisMenuAnalyzeAll,self.analysisMenuFrameIntervals])
+        self.analysisMenu.addActions([self.analysisMenuAnalyzeAll,self.analysisMenuFrameIntervals])
         
         self.analysisMenuSaccades = self.analysisMenu.addMenu('Saccades')
         self.analysisMenuSaccadesFind = QtGui.QAction('Find',self.mainWin)
@@ -462,6 +463,34 @@ class EyeTracker():
         vidOut.release()
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
+            
+    def loadTrackingData(self):
+        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
+        if filePath=='':
+            return
+        self.fileOpenSavePath = os.path.dirname(filePath)
+        fileType = os.path.splitext(filePath)[1][1:]
+        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
+        if fileType=='hdf5':
+            dataFile = h5py.File(filePath,'r')
+            if 'mmPerPixel' in dataFile.attrs.keys():
+                self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
+            for param in set(dataFile.keys()) & set(params[1:]):
+                setattr(self,param,dataFile[param][:])
+            dataFile.close()
+        else:
+            data = np.load(filePath) if fileType=='npz' else scipy.io.loadmat(filePath,squeeze_me=True)
+            for param in set(data.keys()) & set(params):
+                setattr(self,param,data[param])
+        self.dataIsLoaded = True
+        self.reflectCenter -= self.roiPos
+        self.pupilCenter -= self.roiPos
+        self.pupilAreaRange = [self.pupilArea[self.frameNum-1]]*2
+        self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
+        self.pupilYRange = [self.pupilY[self.frameNum-1]]*2
+        self.setDataPlotXRange()
+        self.updatePupilDataPlot()
+        self.plotSaccades()
                
     def loadFrameData(self):
         filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
@@ -918,13 +947,20 @@ class EyeTracker():
             elif self.cam is None and not any([button.isChecked() for button in self.buttons]):
                 self.setCurrentFrameDataNan()
         elif key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right,QtCore.Qt.Key_Up,QtCore.Qt.Key_Down,QtCore.Qt.Key_Minus,QtCore.Qt.Key_Equal):
-            if key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right) and self.cam is None and not any([button.isChecked() for button in self.buttons]) and self.selectedSaccade is not None:
-                move = -1 if key==QtCore.Qt.Key_Left else 1
-                selSaccade = self.getSaccadesOnDisplay()[self.selectedSaccade]
-                for saccades in (self.negSaccades,self.posSaccades):
-                    if selSaccade in saccades:
-                        saccades[saccades==selSaccade] += move
-                        break
+            if key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right,QtCore.Qt.Key_Up,QtCore.Qt.Key_Down) and self.cam is None and not any([button.isChecked() for button in self.buttons]) and self.selectedSaccade is not None:
+                if key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right):
+                    saccades = self.negSaccades if self.selectedSaccade in self.negSaccades else self.posSaccades
+                    move = -1 if key==QtCore.Qt.Key_Left else 1
+                    saccades[saccades==self.selectedSaccade] += move
+                    self.selectedSaccade += move
+                elif key==QtCore.Qt.Key_Up and self.selectedSaccade in self.negSaccades:
+                    self.negSaccades = self.negSaccades[self.negSaccades!=self.selectedSaccade]
+                    self.posSaccades = np.unique(np.concatenate((self.posSaccades,[self.selectedSaccade])))
+                elif key==QtCore.Qt.Key_Down and self.selectedSaccade in self.posSaccades:
+                    self.posSaccades = self.posSaccades[self.posSaccades!=self.selectedSaccade]
+                    self.negSaccades = np.unique(np.concatenate((self.negSaccades,[self.selectedSaccade])))
+                else:
+                    return
                 self.plotSaccades()
             else:
                 if self.roiButton.isChecked():
@@ -968,9 +1004,8 @@ class EyeTracker():
                 if int(modifiers & QtCore.Qt.ControlModifier)>0:
                     self.deleteAllSaccades()
                 elif self.selectedSaccade is not None:
-                    saccades = self.getSaccadesOnDisplay()
-                    self.negSaccades = self.negSaccades[self.negSaccades!=saccades[self.selectedSaccade]]
-                    self.posSaccades = self.posSaccades[self.posSaccades!=saccades[self.selectedSaccade]]
+                    self.negSaccades = self.negSaccades[self.negSaccades!=self.selectedSaccade]
+                    self.posSaccades = self.posSaccades[self.posSaccades!=self.selectedSaccade]
                     self.selectedSaccade = None
                     self.plotSaccades()
             elif self.setMaskButton.isChecked() and len(self.maskRoi)>0:
@@ -991,6 +1026,10 @@ class EyeTracker():
                     self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
                 else:
                     self.reflectCenterPlot.setData(x=[],y=[])
+            if self.stopTracking:
+                self.stopTracking = False
+            if self.setDataNan:
+                self.setDataNan = False
             
     def imageDoubleClickEvent(self,event):
         x,y = event.pos().x(),event.pos().y()
@@ -1018,6 +1057,10 @@ class EyeTracker():
                     self.updatePupilTrackParamPlots()
                 else:
                     self.updatePupilDataPlot()
+            if self.stopTracking:
+                self.stopTracking = False
+            if self.setDataNan:
+                self.setDataNan = False
                     
     def dataPlotMouseClickEvent(self,event):
         if event.button()==QtCore.Qt.RightButton and self.cam is None and not any([button.isChecked() for button in self.buttons]) and (self.negSaccades.size>0 or self.posSaccades.size>0):
@@ -1025,7 +1068,7 @@ class EyeTracker():
             frame = int(round(pos.x()*self.frameRate))+1
             saccades = self.getSaccadesOnDisplay()
             if saccades.size>0:
-                self.selectedSaccade = np.argmin(np.absolute(saccades-frame))
+                self.selectedSaccade = saccades[np.argmin(np.absolute(saccades-frame))]
             
     def dataPlotDoubleClickEvent(self,event):
         if self.cam is None and not any([button.isChecked() for button in self.buttons]):
@@ -1041,8 +1084,7 @@ class EyeTracker():
                     self.negSaccades = np.unique(np.concatenate((self.negSaccades,[frame])))
                 else:
                     self.posSaccades = np.unique(np.concatenate((self.posSaccades,[frame])))
-                saccades = self.getSaccadesOnDisplay()
-                self.selectedSaccade = np.where(saccades==frame)
+                self.selectedSaccade = frame
                 self.plotSaccades()
         
     def setROI(self):
@@ -1749,34 +1791,6 @@ class EyeTracker():
                 self.changePlotWindowDur(fullRange=True)
             else:
                 self.updateDisplay(updateNone=True)
-                
-    def loadTrackingData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
-        if filePath=='':
-            return
-        self.fileOpenSavePath = os.path.dirname(filePath)
-        fileType = os.path.splitext(filePath)[1][1:]
-        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
-        if fileType=='hdf5':
-            dataFile = h5py.File(filePath,'r')
-            if 'mmPerPixel' in dataFile.attrs.keys():
-                self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
-            for param in set(dataFile.keys()) & set(params[1:]):
-                setattr(self,param,dataFile[param][:])
-            dataFile.close()
-        else:
-            data = np.load(filePath) if fileType=='npz' else scipy.io.loadmat(filePath,squeeze_me=True)
-            for param in set(data.keys()) & set(params):
-                setattr(self,param,data[param])
-        self.dataIsLoaded = True
-        self.reflectCenter -= self.roiPos
-        self.pupilCenter -= self.roiPos
-        self.pupilAreaRange = [self.pupilArea[self.frameNum-1]]*2
-        self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
-        self.pupilYRange = [self.pupilY[self.frameNum-1]]*2
-        self.setDataPlotXRange()
-        self.updatePupilDataPlot()
-        self.plotSaccades()
         
     def pixToDeg(self):
         pupilEllipseRadius = (self.pupilArea/math.pi)**0.5
