@@ -160,8 +160,10 @@ class EyeTracker():
         self.trackMenu = self.menuBar.addMenu('Track')
         self.trackMenu.setEnabled(False)
         self.trackMenuStopTracking = QtGui.QAction('Stop Tracking',self.mainWin,checkable=True)
-        self.trackMenuStopTracking.triggered.connect(self.setStopTracking)
-        self.trackMenu.addAction(self.trackMenuStopTracking)
+        self.trackMenuStopTracking.triggered.connect(self.toggleStopTracking)
+        self.trackMenuSetDataNan = QtGui.QAction('Set Data NaN',self.mainWin,checkable=True)
+        self.trackMenuSetDataNan.triggered.connect(self.toggleSetDataNan)
+        self.trackMenu.addActions([self.trackMenuStopTracking,self.trackMenuSetDataNan])
         
         self.trackMenuMmPerPix = self.trackMenu.addMenu('mm/pixel')
         self.trackMenuMmPerPixSet = QtGui.QAction('Set',self.mainWin)
@@ -792,9 +794,10 @@ class EyeTracker():
         for roi in self.maskRoi:
             self.imageViewBox.removeItem(roi)
         self.maskRoi = []
-        self.trackMenuStopTracking.setChecked(False)
-        self.stopTracking = False
-        self.setDataNan = False
+        if self.stopTracking:
+            self.toggleStopTracking()
+        if self.setDataNan:
+            self.toggleSetDataNan()
         
     def resetPupilData(self):
         self.dataPlotIndex = 0
@@ -908,12 +911,23 @@ class EyeTracker():
         if self.cameraMenuNidaqIn.isChecked():
             self.saveCheckBox.setChecked(False)
             
-    def setStopTracking(self):
+    def toggleStopTracking(self):
         self.stopTracking = not self.stopTracking
+        self.trackMenuStopTracking.setChecked(self.stopTracking)
         if self.stopTracking:
             self.reflectCenterPlot.setData(x=[],y=[])
             self.pupilCenterPlot.setData(x=[],y=[])
             self.pupilEllipsePlot.setData(x=[],y=[])
+            if self.setDataNan:
+                self.toggleSetDataNan()
+            
+    def toggleSetDataNan(self):
+        self.setDataNan = not self.setDataNan
+        self.trackMenuSetDataNan.setChecked(self.setDataNan)
+        if self.setDataNan and self.cam is None and not any([button.isChecked() for button in self.buttons]):
+            if self.stopTracking:
+                self.toggleStopTracking()
+            self.setCurrentFrameDataNan()
             
     def setCurrentFrameDataNan(self):
         self.reflectCenterPlot.setData(x=[],y=[])
@@ -922,7 +936,8 @@ class EyeTracker():
         self.pupilArea[self.frameNum-1] = np.nan
         self.pupilX[self.frameNum-1] = np.nan
         self.pupilY[self.frameNum-1] = np.nan
-        self.updatePupilDataPlot()
+        if self.pupilCenterSeed is not None or self.dataIsLoaded:
+            self.updatePupilDataPlot()
             
     def mainWinKeyPressEvent(self,event):
         key = event.key()
@@ -941,9 +956,7 @@ class EyeTracker():
                 self.frameNumSpinBox.setValue(self.frameNum)
         elif key==QtCore.Qt.Key_N:
             if int(modifiers & QtCore.Qt.ControlModifier)>0:
-                self.setDataNan = not self.setDataNan
-                if self.setDataNan:
-                    self.setCurrentFrameDataNan()
+                self.toggleSetDataNan()
             elif self.cam is None and not any([button.isChecked() for button in self.buttons]):
                 self.setCurrentFrameDataNan()
         elif key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right,QtCore.Qt.Key_Up,QtCore.Qt.Key_Down,QtCore.Qt.Key_Minus,QtCore.Qt.Key_Equal):
@@ -996,6 +1009,8 @@ class EyeTracker():
                         roiSize[1] += 2
                 roi.setPos(roiPos)
                 roi.setSize(roiSize)
+        elif key==QtCore.Qt.Key_Escape:
+            self.toggleStopTracking()
         elif key==QtCore.Qt.Key_Space:
             if self.cam is None and not any([button.isChecked() for button in self.buttons]):
                 self.changePlotWindowDur(fullRange=True)
@@ -1018,18 +1033,25 @@ class EyeTracker():
     
     def imageMouseClickEvent(self,event):
         if event.button()==QtCore.Qt.RightButton and not self.roiButton.isChecked() and not self.findReflectButton.isChecked() and self.reflectCenterSeed is not None:
+            if self.stopTracking:
+                self.toggleStopTracking()
+            if self.setDataNan:
+                self.toggleSetDataNan()
             x,y = event.pos().x(),event.pos().y()
             self.reflectRoiPos = [[int(x-self.reflectRoiSize[0][0]/2),int(y-self.reflectRoiSize[0][1]/2)]]
             if not self.startVideoButton.isChecked():
                 self.trackReflect()
                 if self.reflectFound:
                     self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
+                    if self.pupilCenterSeed is not None:
+                        self.trackPupil()
+                        self.updatePupilPlot()
+                        if self.findPupilButton.isChecked():
+                            self.updatePupilTrackParamPlots()
+                        else:
+                            self.updatePupilDataPlot()
                 else:
                     self.reflectCenterPlot.setData(x=[],y=[])
-            if self.stopTracking:
-                self.stopTracking = False
-            if self.setDataNan:
-                self.setDataNan = False
             
     def imageDoubleClickEvent(self,event):
         x,y = event.pos().x(),event.pos().y()
@@ -1049,18 +1071,18 @@ class EyeTracker():
             self.maskRoi[-1].addScaleHandle(pos=(1,1),center=(0.5,0.5))
             self.imageViewBox.addItem(self.maskRoi[-1])
         elif not self.roiButton.isChecked() and (self.findPupilButton.isChecked() or self.pupilCenterSeed is not None):
+            if self.stopTracking:
+                self.toggleStopTracking()
+            if self.setDataNan:
+                self.toggleSetDataNan()
             self.pupilCenterSeed = (x,y)
-            if (self.findPupilButton.isChecked() or not self.startVideoButton.isChecked()) and self.trackMenuPupilMethodStarburst.isChecked():
+            if not self.startVideoButton.isChecked() and self.trackMenuPupilMethodStarburst.isChecked():
                 self.trackPupil()
                 self.updatePupilPlot()
                 if self.findPupilButton.isChecked():
                     self.updatePupilTrackParamPlots()
                 else:
                     self.updatePupilDataPlot()
-            if self.stopTracking:
-                self.stopTracking = False
-            if self.setDataNan:
-                self.setDataNan = False
                     
     def dataPlotMouseClickEvent(self,event):
         if event.button()==QtCore.Qt.RightButton and self.cam is None and not any([button.isChecked() for button in self.buttons]) and (self.negSaccades.size>0 or self.posSaccades.size>0):
