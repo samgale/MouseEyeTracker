@@ -104,7 +104,7 @@ class EyeTracker():
         self.fileMenuOpen = self.fileMenu.addMenu('Open')
         self.fileMenuOpenFrames = QtGui.QAction('Frame Data',self.mainWin)
         self.fileMenuOpenFrames.triggered.connect(self.loadFrameData)
-        self.fileMenuOpenData = QtGui.QAction('Tracking Data',self.mainWin)
+        self.fileMenuOpenData = QtGui.QAction('Tracking Data',self.mainWin,enabled=False)
         self.fileMenuOpenData.triggered.connect(self.loadTrackingData)
         self.fileMenuOpen.addActions([self.fileMenuOpenFrames,self.fileMenuOpenData])
         
@@ -529,6 +529,7 @@ class EyeTracker():
         self.frameNumSpinBox.setSuffix(' of '+str(self.numFrames))
         self.frameNumSpinBox.blockSignals(False)
         self.frameNumSpinBox.setEnabled(True)
+        self.fileMenuOpenData.setEnabled(True)
         self.fileMenuSave.setEnabled(True)
         self.analysisMenu.setEnabled(True)
         for line in self.frameNumLines:
@@ -557,6 +558,7 @@ class EyeTracker():
         self.frameNumSpinBox.setRange(0,1)
         self.frameNumSpinBox.setValue(0)
         self.frameNumSpinBox.setSuffix(' of 0')
+        self.fileMenuOpenData.setEnabled(False)
         self.fileMenuSave.setEnabled(False)
         self.analysisMenu.setEnabled(False)
         self.removeFrameNumLines()
