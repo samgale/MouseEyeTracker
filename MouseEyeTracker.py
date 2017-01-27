@@ -1062,7 +1062,7 @@ class EyeTracker():
         x,y = event.pos().x(),event.pos().y()
         if self.findReflectButton.isChecked():
             n = len(self.reflectRoi)
-            if n<1 or (self.trackMenuReflectTypeRing.isChecked() and n<4):
+            if n<1 or self.trackMenuReflectTypeRing.isChecked():
                 if n<1:
                     roiSize = (math.ceil(0.1*max(self.roiSize)),)*2
                 else:
@@ -1232,7 +1232,9 @@ class EyeTracker():
             if not self.trackMenuPupilMethodStarburst.isChecked():
                 if self.pupilRoi is None:
                     maxBoundsRect = self.imageViewBox.itemBoundingRect(self.imageItem)
-                    self.pupilRoi = pg.ROI((0,0),self.fullRoiSize,maxBounds=maxBoundsRect,pen='r')
+                    self.pupilRoiSize = [int(math.ceil(0.2*max(self.roiSize)))]*2
+                    self.pupilRoiPos = [int(0.5*(self.roiSize[i]-self.pupilRoiSize[i])) for i in (0,1)]
+                    self.pupilRoi = pg.ROI(self.pupilRoiPos,self.pupilRoiSize,maxBounds=maxBoundsRect,pen='r')
                     self.pupilRoi.addScaleHandle(pos=(1,1),center=(0.5,0.5))
                     self.pupilRoi.sigRegionChangeFinished.connect(self.pupilRoiRegionChanged)
                     self.imageViewBox.addItem(self.pupilRoi)
@@ -1662,7 +1664,7 @@ class EyeTracker():
                 roi.setVisible(False)
                 self.reflectRoiPos.append([int(n) for n in roi.pos()])
                 self.reflectRoiSize.append([int(n) for n in roi.size()])
-            if self.trackMenuReflectTypeSpot.isChecked() or len(self.reflectRoi)==4:
+            if self.trackMenuReflectTypeSpot.isChecked() or len(self.reflectRoi)>1:
                 if self.trackMenuReflectTypeRing.isChecked():
                     self.getReflectTemplate()
                     if not self.reflectFound:
@@ -1698,7 +1700,7 @@ class EyeTracker():
                 self.reflectCenter[self.dataPlotIndex,:] = self.reflectCenterSeed
         
     def getReflectTemplate(self):
-        spotCenters = np.zeros((4,2))
+        spotCenters = np.zeros((len(self.reflectRoi),2))
         ptsAboveThresh = []
         for i,(roiPos,roiSize) in enumerate(zip(self.reflectRoiPos,self.reflectRoiSize)):
             y,x = np.where(self.image[self.roiInd][roiPos[1]:roiPos[1]+roiSize[1],roiPos[0]:roiPos[0]+roiSize[0]]>self.reflectThresh)
