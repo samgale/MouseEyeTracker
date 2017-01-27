@@ -341,6 +341,7 @@ class EyeTracker():
         # save and mask checkboxes
         self.saveCheckBox = QtGui.QCheckBox('Save Video Data',enabled=False)
         self.useMaskCheckBox = QtGui.QCheckBox('Use Masks')
+        self.useMaskCheckBox.clicked.connect(self.setUseMask)
         
         # frame navigation
         self.frameNumSpinBox = QtGui.QSpinBox()
@@ -499,6 +500,7 @@ class EyeTracker():
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
+        self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+filePath)
         if self.cam is not None:
             self.cameraMenuUseCam.setChecked(False)
             self.closeCamera()
@@ -567,6 +569,7 @@ class EyeTracker():
         self.frameTimes = []
         self.resetPupilTracking()
         self.deleteAllSaccades()
+        self.mainWin.setWindowTitle('MouseEyeTracker')
        
     def initCamera(self):
         if self.cameraMenuUseCam.isChecked():
@@ -1192,6 +1195,12 @@ class EyeTracker():
             x,y = [int(n) for n in roi.pos()]
             w,h = [int(n) for n in roi.size()]
             self.maskIndex.append(np.s_[y:y+h,x:x+w])
+            
+    def setUseMask(self):
+        if self.cam is None and not any([button.isChecked() for button in self.buttons]) and self.pupilCenterSeed is not None:
+            self.trackPupil()
+            self.updatePupilPlot()
+            self.updatePupilDataPlot()
      
     def findPupil(self):
         if self.findPupilButton.isChecked():
