@@ -500,7 +500,6 @@ class EyeTracker():
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+filePath)
         if self.cam is not None:
             self.cameraMenuUseCam.setChecked(False)
             self.closeCamera()
@@ -508,6 +507,7 @@ class EyeTracker():
             self.closeDataFileIn()
         elif self.video is not None:
             self.closeVideo()
+        self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+filePath)
         if os.path.splitext(os.path.basename(filePath))[1]=='.hdf5':
             self.dataFileIn = h5py.File(filePath,'r')
             self.frameRate = self.dataFileIn.attrs.get('frameRate')
