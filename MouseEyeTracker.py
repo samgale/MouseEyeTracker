@@ -597,7 +597,8 @@ class EyeTracker():
                     import nidaq
                     self.nidaqDigInputs = nidaq.DigitalInputs(device='Dev1',port=0)
                     self.nidaqDigOutputs = nidaq.DigitalOutputs(device='Dev1',port=1,initialState='low')
-                    self.nidaqCh = 0
+                    self.nidaqInCh = 0
+                    self.nidaqOutCh = 0
                     self.cameraMenuNidaq.setEnabled(True)
                     self.cameraMenuNidaqOut.setChecked(True)
                     self.nidaq = True
@@ -889,7 +890,7 @@ class EyeTracker():
         self.frameNum += 1
         self.image = img
         skipDisplayUpdate = False
-        if (self.saveCheckBox.isChecked() and not self.cameraMenuNidaqIn.isChecked()) or (self.cameraMenuNidaqIn.isChecked() and not self.nidaqDigInputs.Read()[self.nidaqCh]):
+        if (self.saveCheckBox.isChecked() and not self.cameraMenuNidaqIn.isChecked()) or (self.cameraMenuNidaqIn.isChecked() and not self.nidaqDigInputs.Read()[self.nidaqInCh]):
             if self.dataFileOut is None:
                 self.frameNum = 0
                 if self.cameraMenuNidaqIn.isChecked():
@@ -899,10 +900,10 @@ class EyeTracker():
                 self.dataFileOut.attrs.create('mmPerPixel',self.mmPerPixel)
                 skipDisplayUpdate = True
             else:
-                self.nidaqDigOutputs.WriteBit(self.nidaqCh,1)
+                self.nidaqDigOutputs.WriteBit(self.nidaqOutCh,1)
                 dataset = self.dataFileOut.create_dataset(str(self.frameNum),data=self.image,chunks=self.image.shape,compression='gzip',compression_opts=1)
                 dataset.attrs.create('acquisitionTime',timestamp/self.cam.GevTimestampTickFrequency)
-                self.nidaqDigOutputs.WriteBit(self.nidaqCh,0)
+                self.nidaqDigOutputs.WriteBit(self.nidaqOutCh,0)
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
             skipDisplayUpdate = True
