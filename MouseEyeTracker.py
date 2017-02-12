@@ -110,13 +110,19 @@ class EyeTracker():
         
         self.fileMenuSave = self.fileMenu.addMenu('Save')
         self.fileMenuSave.setEnabled(False)
-        self.fileMenuSaveData = self.fileMenuSave.addMenu('Data')
+        self.fileMenuSaveFrames = self.fileMenuSave.addMenu('Frame Data')
+        self.fileMenuSaveFramesNpz = QtGui.QAction('npz',self.mainWin)
+        self.fileMenuSaveFramesNpz.triggered.connect(self.saveFrameData)
+        self.fileMenuSaveFramesMat = QtGui.QAction('mat',self.mainWin)
+        self.fileMenuSaveFramesMat.triggered.connect(self.saveFrameData)
+        self.fileMenuSaveFrames.addActions([self.fileMenuSaveFramesNpz,self.fileMenuSaveFramesMat])
+        self.fileMenuSaveData = self.fileMenuSave.addMenu('Tracking Data')
         self.fileMenuSaveDataHdf5 = QtGui.QAction('hdf5',self.mainWin)
-        self.fileMenuSaveDataHdf5.triggered.connect(self.saveData)
+        self.fileMenuSaveDataHdf5.triggered.connect(self.saveTrackingData)
         self.fileMenuSaveDataNpz = QtGui.QAction('npz',self.mainWin)
-        self.fileMenuSaveDataNpz.triggered.connect(self.saveData)
+        self.fileMenuSaveDataNpz.triggered.connect(self.saveTrackingData)
         self.fileMenuSaveDataMat = QtGui.QAction('mat',self.mainWin)
-        self.fileMenuSaveDataMat.triggered.connect(self.saveData)
+        self.fileMenuSaveDataMat.triggered.connect(self.saveTrackingData)
         self.fileMenuSaveData.addActions([self.fileMenuSaveDataHdf5,self.fileMenuSaveDataNpz,self.fileMenuSaveDataMat])
         self.fileMenuSaveMovie = QtGui.QAction('Movie',self.mainWin)
         self.fileMenuSaveMovie.triggered.connect(self.saveMovie)
@@ -410,7 +416,37 @@ class EyeTracker():
             self.nidaqDigOutputs.ClearTask()
         event.accept()
         
-    def saveData(self):
+    def saveFrameData(self):
+        if self.mainWin.sender()==self.fileMenuSaveDataNpz:
+            fileType = 'npz'
+        else:
+            fileType = 'mat'
+        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.'+fileType)
+        if filePath=='':
+            return
+        self.fileOpenSavePath = os.path.dirname(filePath)
+        startFrame,endFrame = self.getFrameSaveRange()
+        if startFrame is None:
+            return
+        frameData = np.zeros((self.roiSize[1],self.roiSize[0],endFrame-startFrame+1),dtype=self.image.dtype)
+        if self.dataFileIn is None:
+            self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
+        for i,frame in enumerate(range(startFrame,endFrame+1)):
+            if self.dataFileIn is None:
+                isImage,image = self.video.read()
+                image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+            else:
+                image = self.dataFileIn[str(frame)][:,:]
+            frameData[:,:,i] = image[self.roiInd]
+        if self.dataFileIn is None:
+            self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
+        data = {'frameData': frameData}
+        if fileType=='npz':
+            np.savez_compressed(filePath,**data)
+        else:
+            scipy.io.savemat(filePath,data,do_compression=True)
+        
+    def saveTrackingData(self):
         if self.mainWin.sender()==self.fileMenuSaveDataHdf5:
             fileType = 'hdf5'
         elif self.mainWin.sender()==self.fileMenuSaveDataNpz:
@@ -440,19 +476,13 @@ class EyeTracker():
                 scipy.io.savemat(filePath,data,do_compression=True)
         
     def saveMovie(self):
-        startFrame,endFrame = (self.frameNum-self.numDataPlotPts,self.frameNum) if self.frameNum>self.numDataPlotPts else (1,self.numDataPlotPts)
-        text,ok = QtGui.QInputDialog.getText(self.mainWin,'Save Movie','Enter frames range:',text=str(startFrame)+'-'+str(endFrame))
-        if not ok:
-            return
-        startFrame,endFrame = [int(n) for n in text.split('-')]
-        if startFrame<1:
-            startFrame = 1
-        if endFrame>self.numFrames:
-            endFrame = self.numFrames
         filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
+        startFrame,endFrame = self.getFrameSaveRange()
+        if startFrame is None:
+            return
         vidOut = cv2.VideoWriter(filePath,-1,self.frameRate,self.roiSize)
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
@@ -467,33 +497,17 @@ class EyeTracker():
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
             
-    def loadTrackingData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
-        if filePath=='':
-            return
-        self.fileOpenSavePath = os.path.dirname(filePath)
-        fileType = os.path.splitext(filePath)[1][1:]
-        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
-        if fileType=='hdf5':
-            dataFile = h5py.File(filePath,'r')
-            if 'mmPerPixel' in dataFile.attrs.keys():
-                self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
-            for param in set(dataFile.keys()) & set(params[1:]):
-                setattr(self,param,dataFile[param][:])
-            dataFile.close()
-        else:
-            data = np.load(filePath) if fileType=='npz' else scipy.io.loadmat(filePath,squeeze_me=True)
-            for param in set(data.keys()) & set(params):
-                setattr(self,param,data[param])
-        self.dataIsLoaded = True
-        self.reflectCenter -= self.roiPos
-        self.pupilCenter -= self.roiPos
-        self.pupilAreaRange = [self.pupilArea[self.frameNum-1]]*2
-        self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
-        self.pupilYRange = [self.pupilY[self.frameNum-1]]*2
-        self.setDataPlotXRange()
-        self.updatePupilDataPlot()
-        self.plotSaccades()
+    def getFrameSaveRange(self):
+        startFrame,endFrame = (self.frameNum-self.numDataPlotPts,self.frameNum) if self.frameNum>self.numDataPlotPts else (1,self.numDataPlotPts)
+        text,ok = QtGui.QInputDialog.getText(self.mainWin,'Save Movie','Enter frames range:',text=str(startFrame)+'-'+str(endFrame))
+        if not ok:
+            return None,None
+        startFrame,endFrame = [int(n) for n in text.split('-')]
+        if startFrame<1:
+            startFrame = 1
+        if endFrame>self.numFrames:
+            endFrame = self.numFrames
+        return startFrame,endFrame
                
     def loadFrameData(self):
         filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
@@ -541,6 +555,34 @@ class EyeTracker():
         self.frameNum = 1
         self.getVideoImage()
         self.initDisplay()
+        
+    def loadTrackingData(self):
+        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
+        if filePath=='':
+            return
+        self.fileOpenSavePath = os.path.dirname(filePath)
+        fileType = os.path.splitext(filePath)[1][1:]
+        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
+        if fileType=='hdf5':
+            dataFile = h5py.File(filePath,'r')
+            if 'mmPerPixel' in dataFile.attrs.keys():
+                self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
+            for param in set(dataFile.keys()) & set(params[1:]):
+                setattr(self,param,dataFile[param][:])
+            dataFile.close()
+        else:
+            data = np.load(filePath) if fileType=='npz' else scipy.io.loadmat(filePath,squeeze_me=True)
+            for param in set(data.keys()) & set(params):
+                setattr(self,param,data[param])
+        self.dataIsLoaded = True
+        self.reflectCenter -= self.roiPos
+        self.pupilCenter -= self.roiPos
+        self.pupilAreaRange = [self.pupilArea[self.frameNum-1]]*2
+        self.pupilXRange = [self.pupilX[self.frameNum-1]]*2
+        self.pupilYRange = [self.pupilY[self.frameNum-1]]*2
+        self.setDataPlotXRange()
+        self.updatePupilDataPlot()
+        self.plotSaccades()
         
     def closeDataFileIn(self):
         self.closeFileCleanup()
