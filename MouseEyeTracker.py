@@ -1673,7 +1673,7 @@ class EyeTracker():
         self.updatePupilTrackParamPlots()
         
     def setMinNumPixAboveThresh(self):
-        self.minNumPixAboveThresh = round(self.numPixAboveThreshLine.value())
+        self.minNumPixAboveThresh = int(round(self.numPixAboveThreshLine.value()))
         self.edgeFilt = np.ones(self.minNumPixAboveThresh)
         self.trackPupil()
         self.updatePupilPlot()
