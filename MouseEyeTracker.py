@@ -61,6 +61,8 @@ class EyeTracker():
         self.dataFileOut = None
         self.image = None
         self.roi = None
+        self.blurSigma = 2.0
+        self.imgExponent = 2.0
         self.stopTracking = False
         self.setDataNan = False
         self.pupilCenterSeed = None
@@ -177,6 +179,16 @@ class EyeTracker():
         self.trackMenuMmPerPixMeasure = QtGui.QAction('Measure',self.mainWin,enabled=False)
         self.trackMenuMmPerPixMeasure.triggered.connect(self.measureMmPerPix)
         self.trackMenuMmPerPix.addActions([self.trackMenuMmPerPixSet,self.trackMenuMmPerPixMeasure])
+        
+        self.trackMenuBlurImage = QtGui.QAction('Guassian Blur Image',self.mainWin,checkable=True)
+        self.trackMenuBlurImage.triggered.connect(self.setBlurImage)
+        self.trackMenuSetBlurSigma = QtGui.QAction('Set Blur Sigma',self.mainWin)
+        self.trackMenuSetBlurSigma.triggered.connect(self.setBlurSigma)
+        self.trackMenuExpImage = QtGui.QAction('Exponentiate Image',self.mainWin,checkable=True)
+        self.trackMenuExpImage.triggered.connect(self.setExponentiateImage)
+        self.trackMenuSetExp = QtGui.QAction('Set Exponent',self.mainWin)
+        self.trackMenuSetExp.triggered.connect(self.setExponent)
+        self.trackMenu.addActions([self.trackMenuBlurImage,self.trackMenuSetBlurSigma,self.trackMenuExpImage,self.trackMenuSetExp])
         
         self.trackMenuReflectType = self.trackMenu.addMenu('Reflection Type')
         self.trackMenuReflectTypeSpot = QtGui.QAction('Spot',self.mainWin,checkable=True)
@@ -795,6 +807,48 @@ class EyeTracker():
         else:
             isImage,image = self.video.read()
             self.image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+            if self.trackMenuBlurImage.isChecked():
+                self.blurImage()
+            if self.trackMenuExpImage.isChecked():
+                self.exponentiateImage()
+                
+    def blurImage(self):
+        self.image = cv2.GaussianBlur(self.image,(0,0),self.blurSigma)
+                
+    def setBlurImage(self):
+        self.getVideoImage()
+        self.updateDisplay()
+        
+    def setBlurSigma(self):
+        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Blur Sigma','',value=self.blurSigma,min=0.01,decimals=2)
+        if not ok:
+            return
+        self.blurSigma = val
+        if self.trackMenuBlurImage.isChecked():
+            self.getVideoImage()
+            self.updateDisplay()
+            
+    def exponentiateImage(self):
+        self.image = self.image.astype(float)
+        self.image /= self.image.max()
+        self.image = 1-self.image
+        self.image **= self.imgExponent
+        self.image = 1-self.image
+        self.image *= 255/self.image.max()
+        self.image = self.image.astype(np.uint8)
+        
+    def setExponentiateImage(self):
+        self.getVideoImage()
+        self.updateDisplay()
+        
+    def setExponent(self):
+        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Exponent','',value=self.imgExponent,min=0.01,decimals=2)
+        if not ok:
+            return
+        self.imgExponent = val
+        if self.trackMenuExpImage.isChecked():
+            self.getVideoImage()
+            self.updateDisplay()
                     
     def initDisplay(self):
         self.resetROI()
@@ -1442,7 +1496,7 @@ class EyeTracker():
         img[img>230] = 0
         if self.pupilGradientDownsample<1:
             img = cv2.resize(img,(0,0),fx=self.pupilGradientDownsample,fy=self.pupilGradientDownsample,interpolation=cv2.INTER_AREA)
-        cv2.GaussianBlur(img,(0,0),0.005*img.shape[1])
+        img = cv2.GaussianBlur(img,(0,0),0.005*img.shape[1])
         gradY,gradX = np.gradient(img.astype(float))
         gradLength = np.sqrt(gradX**2+gradY**2)
         gradIndex = gradLength>np.mean(gradLength)+0.3*np.std(gradLength)
