@@ -217,7 +217,9 @@ class EyeTracker():
         self.trackMenuPupilMethodLine.triggered.connect(self.setPupilTrackMethod)
         self.trackMenuPupilMethodGradients = QtGui.QAction('Gradients',self.mainWin,checkable=True)
         self.trackMenuPupilMethodGradients.triggered.connect(self.setPupilTrackMethod)
-        self.trackMenuPupilMethod.addActions([self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients])
+        self.trackMenuPupilMethodIntensity = QtGui.QAction('Intensity',self.mainWin,checkable=True)
+        self.trackMenuPupilMethodIntensity.triggered.connect(self.setPupilTrackMethod)
+        self.trackMenuPupilMethod.addActions([self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients,self.trackMenuPupilMethodIntensity])
         
         self.trackMenuAdaptThresh = QtGui.QAction('Adaptive Threshold',self.mainWin,checkable=True)
         self.trackMenuAdaptThresh.triggered.connect(self.setAdaptiveThreshold)
@@ -336,8 +338,8 @@ class EyeTracker():
                 tri.lineTo(x[i],y[i])
             tri.closeSubpath()
         downTriangle,upTriangle = triangles
-        self.negSaccadesPlot = self.pupilXPlotItem.plot(x=[],y=[],pen=None,symbol=downTriangle,symbolSize=10,symbolPen='b')
-        self.posSaccadesPlot = self.pupilXPlotItem.plot(x=[],y=[],pen=None,symbol=upTriangle,symbolSize=10,symbolPen='b')
+        self.negSaccadesPlot = self.pupilXPlotItem.plot(x=[],y=[],pen=None,symbol=downTriangle,symbolSize=10,symbolPen='g',symbolBrush='g')
+        self.posSaccadesPlot = self.pupilXPlotItem.plot(x=[],y=[],pen=None,symbol=upTriangle,symbolSize=10,symbolPen='b',symbolBrush='b')
         
         # pupil tracking parameter plots
         numPupilEdges = 18
@@ -1132,6 +1134,11 @@ class EyeTracker():
         elif key==QtCore.Qt.Key_F:
             if self.cam is None and not any([button.isChecked() for button in self.buttons]):
                 self.findSaccades()
+        elif key==QtCore.Qt.Key_S:
+            if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                self.posSaccades = np.unique(np.concatenate((self.posSaccades,[self.frameNum-1])))
+                self.selectedSaccade = self.frameNum-1
+                self.plotSaccades()
     
     def imageMouseClickEvent(self,event):
         if event.button()==QtCore.Qt.RightButton and not self.roiButton.isChecked() and not self.findReflectButton.isChecked() and self.reflectCenterSeed is not None:
@@ -1302,7 +1309,7 @@ class EyeTracker():
     def findPupil(self):
         if self.findPupilButton.isChecked():
             self.turnOffButtons(source=self.findPupilButton)
-            if not self.trackMenuPupilMethodGradients.isChecked():
+            if self.trackMenuPupilMethodStarburst.isChecked() or self.trackMenuPupilMethodLine.isChecked():
                 if self.pupilCenterSeed is None:
                     self.pupilEdgeThresh = 2*self.image[self.roiInd][self.image[self.roiInd]>0].min()
                     self.minNumPixAboveThresh = 2
@@ -1340,7 +1347,7 @@ class EyeTracker():
                     self.pupilRoi.setSize(self.pupilRoiSize)
                     self.pupilRoi.setVisible(True)
         else:
-            if not self.trackMenuPupilMethodGradients.isChecked():
+            if self.trackMenuPupilMethodStarburst.isChecked() or self.trackMenuPupilMethodLine.isChecked():
                 self.pupilEdgePtsPlot.setData(x=[],y=[])
                 for i in range(len(self.radialProfilePlot)):
                     self.radialProfilePlot[i].setData(x=[],y=[])
@@ -1389,8 +1396,10 @@ class EyeTracker():
                 self.findPupilWithStarburst(img)
             elif self.trackMenuPupilMethodLine.isChecked():
                 self.findPupilWithLine(img)
-            else:
+            elif self.trackMenuPupilMethodGradients.isChecked():
                 self.findPupilWithGradients(img)
+            else:
+                self.findPupilWithIntensity(img)
         self.updatePupilData()
         
     def findPupilWithStarburst(self,img):
@@ -1540,6 +1549,13 @@ class EyeTracker():
         self.pupilCenterSeed = [int(center[i]/self.pupilGradientDownsample)+self.pupilRoiPos[i] for i in (0,1)]
         self.pupilFound = True
         
+    def findPupilWithIntensity(self,img):
+        imgRoi = img[self.pupilRoiPos[1]:self.pupilRoiPos[1]+self.pupilRoiSize[1],self.pupilRoiPos[0]:self.pupilRoiPos[0]+self.pupilRoiSize[0]]
+        maxInd = np.unravel_index(np.argmax(imgRoi),imgRoi.shape)
+        self.pupilCenterSeed = [self.pupilRoiPos[0]+maxInd[1],self.pupilRoiPos[1]+maxInd[0]]
+        self.pupilRoiIntensity = imgRoi.mean()
+        self.pupilFound = True
+        
     def setPupilSign(self):
         if self.mainWin.sender() is self.trackMenuPupilSignNeg:
             self.trackMenuPupilSignNeg.setChecked(True)
@@ -1552,12 +1568,13 @@ class EyeTracker():
         self.pupilEllipsePlot.setData(x=[],y=[])
         
     def setPupilTrackMethod(self):
-        methods = (self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients) 
-        params = (self.trackMenuCircularity,self.trackMenuLineOrigin,self.trackMenuGradientDownsamp)
+        methods = (self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients,self.trackMenuPupilMethodIntensity) 
+        params = (self.trackMenuCircularity,self.trackMenuLineOrigin,self.trackMenuGradientDownsamp,None)
         for method,param in zip(methods,params):
             isSelected = method is self.mainWin.sender()
             method.setChecked(isSelected)
-            param.setEnabled(isSelected)
+            if param is not None:
+                param.setEnabled(isSelected)
         self.pupilCenterSeed = None
         self.pupilCenterPlot.setData(x=[],y=[])
         self.pupilEllipsePlot.setData(x=[],y=[])
@@ -1610,10 +1627,12 @@ class EyeTracker():
                 self.pupilArea[self.dataPlotIndex] = math.pi*self.pupilEllipseRadii[1]**2
                 if not np.isnan(self.mmPerPixel):
                     self.pupilArea[self.dataPlotIndex] *= self.mmPerPixel**2
+            elif self.trackMenuPupilMethodIntensity.isChecked():
+                self.pupilArea[self.dataPlotIndex] = self.pupilRoiIntensity
             if self.reflectCenterSeed is None:
                 self.pupilX[self.dataPlotIndex] = self.pupilCenterSeed[0]
                 self.pupilY[self.dataPlotIndex] = self.pupilCenterSeed[1] 
-            elif np.isnan(self.mmPerPixel) or self.trackMenuReflectTypeSpot.isChecked() or self.trackMenuPupilMethodGradients.isChecked():
+            elif self.trackMenuReflectTypeSpot.isChecked() or not self.trackMenuPupilMethodStarburst.isChecked() or np.isnan(self.mmPerPixel):
                 self.pupilX[self.dataPlotIndex] = self.pupilCenterSeed[0]-self.reflectCenterSeed[0]
                 self.pupilY[self.dataPlotIndex] = self.pupilCenterSeed[1]-self.reflectCenterSeed[1]
             else:
@@ -1867,6 +1886,8 @@ class EyeTracker():
                 
     def goToFrame(self):
         self.frameNum = self.frameNumSpinBox.value()
+        if self.video is not None:
+            self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         self.getVideoImage()
         self.updateDisplay(updateAll=True)
     
