@@ -657,13 +657,16 @@ class EyeTracker():
                 if not self.nidaq:
                     try:
                         import nidaq
-                        self.nidaqDigInputs = nidaq.DigitalInputs(device='Dev1',port=0)
-                        self.nidaqDigOutputs = nidaq.DigitalOutputs(device='Dev1',port=1,initialState='low')
-                        self.nidaqInCh = 0
-                        self.nidaqOutCh = 0
-                        self.cameraMenuNidaq.setEnabled(True)
-                        self.cameraMenuNidaqOut.setChecked(True)
-                        self.nidaq = True
+                        deviceNames = nidaq.GetDevices()
+                        selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
+                        if ok:
+                            self.nidaqDigInputs = nidaq.DigitalInputs(device='Dev1',port=0)
+                            self.nidaqDigOutputs = nidaq.DigitalOutputs(device='Dev1',port=1,initialState='low')
+                            self.nidaqInCh = 0
+                            self.nidaqOutCh = 0
+                            self.cameraMenuNidaq.setEnabled(True)
+                            self.cameraMenuNidaqOut.setChecked(True)
+                            self.nidaq = True
                     except:
                         traceback.print_exc()
                         raise Warning('Error initializing nidaq')
