@@ -8,7 +8,8 @@ Acquire data with camera or analyze data from hdf5 or video file
 
 import sip
 sip.setapi('QString', 2)
-import os, time, math, cv2, h5py
+import h5py, math, os, time, traceback
+import cv2
 import numpy as np
 import scipy.io
 import scipy.signal
@@ -633,42 +634,48 @@ class EyeTracker():
                 self.closeDataFileIn()
             elif self.video is not None:
                 self.closeVideo()
-            if self.vimba is None:
-                try:
+            try:
+                if self.vimba is None:
                     import pymba
                     self.vimba = pymba.Vimba()
-                except:
-                    raise ImportError('pymba')
-            try:
                 self.vimba.startup()
                 system = self.vimba.getSystem()
                 system.runFeatureCommand("GeVDiscoveryAllOnce")
                 time.sleep(0.2)
                 cameraIds = self.vimba.getCameraIds()
-                self.cam = self.vimba.getCamera(cameraIds[0])
+                selectedCam,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',cameraIds,editable=False)
+                if ok:
+                    self.cam = self.vimba.getCamera(selectedCam)
             except:
-                raise RuntimeError('Unable to open camera')
-            if not self.nidaq:
-                try:
-                    import nidaq
-                    self.nidaqDigInputs = nidaq.DigitalInputs(device='Dev1',port=0)
-                    self.nidaqDigOutputs = nidaq.DigitalOutputs(device='Dev1',port=1,initialState='low')
-                    self.nidaqInCh = 0
-                    self.nidaqOutCh = 0
-                    self.cameraMenuNidaq.setEnabled(True)
-                    self.cameraMenuNidaqOut.setChecked(True)
-                    self.nidaq = True
-                except:
-                    raise Warning('Unable to import/use nidaq')
-            self.cam.openCamera()
-            self.setCamProps()
-            self.dataPlotDur = self.defaultDataPlotDur
-            self.frameNum = 0
-            self.initDisplay()
-            self.cameraMenuSettings.setEnabled(True)
-            self.trackMenuMmPerPixMeasure.setEnabled(True)
-            if not self.cameraMenuNidaqIn.isChecked():
-                self.saveCheckBox.setEnabled(True)
+                traceback.print_exc()
+                raise Warning('Error initializing camera')
+            if self.cam is None:
+                if self.vimba is not None:
+                    self.vimba.shutdown()
+                self.cameraMenuUseCam.setChecked(False)
+            else:
+                if not self.nidaq:
+                    try:
+                        import nidaq
+                        self.nidaqDigInputs = nidaq.DigitalInputs(device='Dev1',port=0)
+                        self.nidaqDigOutputs = nidaq.DigitalOutputs(device='Dev1',port=1,initialState='low')
+                        self.nidaqInCh = 0
+                        self.nidaqOutCh = 0
+                        self.cameraMenuNidaq.setEnabled(True)
+                        self.cameraMenuNidaqOut.setChecked(True)
+                        self.nidaq = True
+                    except:
+                        traceback.print_exc()
+                        raise Warning('Error initializing nidaq')
+                self.cam.openCamera()
+                self.setCamProps()
+                self.dataPlotDur = self.defaultDataPlotDur
+                self.frameNum = 0
+                self.initDisplay()
+                self.cameraMenuSettings.setEnabled(True)
+                self.trackMenuMmPerPixMeasure.setEnabled(True)
+                if not self.cameraMenuNidaqIn.isChecked():
+                    self.saveCheckBox.setEnabled(True)
         else:
             self.closeCamera() 
             
