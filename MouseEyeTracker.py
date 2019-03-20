@@ -660,8 +660,8 @@ class EyeTracker():
                         deviceNames = nidaq.GetDevices()
                         selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
                         if ok:
-                            self.nidaqDigInputs = nidaq.DigitalInputs(device='Dev1',port=0)
-                            self.nidaqDigOutputs = nidaq.DigitalOutputs(device='Dev1',port=1,initialState='low')
+                            self.nidaqDigInputs = nidaq.DigitalInputs(device=selectedDevice,port=0)
+                            self.nidaqDigOutputs = nidaq.DigitalOutputs(device=selectedDevice,port=1,initialState='low')
                             self.nidaqInCh = 0
                             self.nidaqOutCh = 0
                             self.cameraMenuNidaq.setEnabled(True)
@@ -687,6 +687,7 @@ class EyeTracker():
         self.cam.closeCamera()
         self.vimba.shutdown()
         self.cam = None
+        self.nidaq = False
         self.cameraMenuSettings.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
