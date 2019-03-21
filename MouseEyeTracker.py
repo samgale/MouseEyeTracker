@@ -427,8 +427,8 @@ class EyeTracker():
         elif self.dataFileIn is not None:
             self.closeDataFileIn()
         if self.nidaq:
-            self.nidaqDigInputs.ClearTask()
-            self.nidaqDigOutputs.ClearTask()
+            self.nidaqDigInputs.clear()
+            self.nidaqDigOutputs.clear()
         event.accept()
         
     def saveFrameData(self):
@@ -657,11 +657,11 @@ class EyeTracker():
                 if not self.nidaq:
                     try:
                         import nidaq
-                        deviceNames = nidaq.GetDevices()
+                        deviceNames = nidaq.System().getDevNames()
                         selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
                         if ok:
-                            self.nidaqDigInputs = nidaq.DigitalInputs(device=selectedDevice,port=0)
-                            self.nidaqDigOutputs = nidaq.DigitalOutputs(device=selectedDevice,port=1,initialState='low')
+                            self.nidaqDigInputs = nidaq.DigitalInput(device=selectedDevice,port=0)
+                            self.nidaqDigOutputs = nidaq.DigitalOutput(device=selectedDevice,port=1,initial_state='low')
                             self.nidaqInCh = 0
                             self.nidaqOutCh = 0
                             self.cameraMenuNidaq.setEnabled(True)
@@ -696,9 +696,9 @@ class EyeTracker():
     def startCamera(self,bufferSize=1):
         self.cameraMenuSettings.setEnabled(False)
         if self.nidaq:
-            self.nidaqDigInputs.StartTask()
-            self.nidaqDigOutputs.StartTask()
-            self.nidaqDigOutputs.Write(np.zeros(self.nidaqDigOutputs.deviceLines,dtype=np.uint8))
+            self.nidaqDigInputs.start()
+            self.nidaqDigOutputs.start()
+            self.nidaqDigOutputs.write(np.zeros(self.nidaqDigOutputs.no_lines,dtype=np.uint8))
         for _ in range(bufferSize):
             frame = self.cam.getFrame()
             frame.announceFrame()
@@ -713,8 +713,8 @@ class EyeTracker():
         if self.dataFileOut is not None:
             self.closeDataFileOut()
         if self.nidaq:
-            self.nidaqDigInputs.StopTask()
-            self.nidaqDigOutputs.StopTask()
+            self.nidaqDigInputs.stop()
+            self.nidaqDigOutputs.stop()
         self.cameraMenuSettings.setEnabled(True)
         
     def getCamImage(self):
@@ -999,7 +999,7 @@ class EyeTracker():
         self.frameNum += 1
         self.image = img
         skipDisplayUpdate = False
-        if (self.saveCheckBox.isChecked() and not self.cameraMenuNidaqIn.isChecked()) or (self.cameraMenuNidaqIn.isChecked() and not self.nidaqDigInputs.Read()[self.nidaqInCh]):
+        if (self.saveCheckBox.isChecked() and not self.cameraMenuNidaqIn.isChecked()) or (self.cameraMenuNidaqIn.isChecked() and not self.nidaqDigInputs.read()[self.nidaqInCh]):
             if self.dataFileOut is None:
                 self.frameNum = 0
                 if self.cameraMenuNidaqIn.isChecked():
@@ -1009,10 +1009,10 @@ class EyeTracker():
                 self.dataFileOut.attrs.create('mmPerPixel',self.mmPerPixel)
                 skipDisplayUpdate = True
             else:
-                self.nidaqDigOutputs.WriteBit(self.nidaqOutCh,1)
+                self.nidaqDigOutputs.writeBit(self.nidaqOutCh,1)
                 dataset = self.dataFileOut.create_dataset(str(self.frameNum),data=self.image,chunks=self.image.shape,compression='gzip',compression_opts=1)
                 dataset.attrs.create('acquisitionTime',timestamp/self.cam.GevTimestampTickFrequency)
-                self.nidaqDigOutputs.WriteBit(self.nidaqOutCh,0)
+                self.nidaqDigOutputs.writeBit(self.nidaqOutCh,0)
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
             skipDisplayUpdate = True
