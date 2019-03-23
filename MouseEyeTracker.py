@@ -426,9 +426,6 @@ class EyeTracker():
             self.closeVideo()
         elif self.dataFileIn is not None:
             self.closeDataFileIn()
-        if self.nidaq:
-            self.nidaqDigInputs.clear()
-            self.nidaqDigOutputs.clear()
         event.accept()
         
     def saveFrameData(self):
@@ -639,8 +636,7 @@ class EyeTracker():
                     import pymba
                     self.vimba = pymba.Vimba()
                 self.vimba.startup()
-                system = self.vimba.getSystem()
-                system.runFeatureCommand("GeVDiscoveryAllOnce")
+                self.vimba.getSystem().runFeatureCommand("GeVDiscoveryAllOnce")
                 time.sleep(0.2)
                 cameraIds = self.vimba.getCameraIds()
                 selectedCam,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',cameraIds,editable=False)
@@ -654,22 +650,21 @@ class EyeTracker():
                     self.vimba.shutdown()
                 self.cameraMenuUseCam.setChecked(False)
             else:
-                if not self.nidaq:
-                    try:
-                        import nidaq
-                        deviceNames = nidaq.System().getDevNames()
-                        selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
-                        if ok:
-                            self.nidaqDigInputs = nidaq.DigitalInput(device=selectedDevice,port=0)
-                            self.nidaqDigOutputs = nidaq.DigitalOutput(device=selectedDevice,port=1,initial_state='low')
-                            self.nidaqInCh = 0
-                            self.nidaqOutCh = 0
-                            self.cameraMenuNidaq.setEnabled(True)
-                            self.cameraMenuNidaqOut.setChecked(True)
-                            self.nidaq = True
-                    except:
-                        traceback.print_exc()
-                        raise Warning('Error initializing nidaq')
+                try:
+                    import nidaq
+                    deviceNames = nidaq.System().getDevNames()
+                    selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
+                    if ok:
+                        self.nidaqDigInputs = nidaq.DigitalInput(device=selectedDevice,port=0)
+                        self.nidaqDigOutputs = nidaq.DigitalOutput(device=selectedDevice,port=1,initial_state='low')
+                        self.nidaqInCh = 0
+                        self.nidaqOutCh = 0
+                        self.cameraMenuNidaq.setEnabled(True)
+                        self.cameraMenuNidaqOut.setChecked(True)
+                        self.nidaq = True
+                except:
+                    traceback.print_exc()
+                    raise Warning('Error initializing nidaq')
                 self.cam.openCamera()
                 self.setCamProps()
                 self.dataPlotDur = self.defaultDataPlotDur
@@ -687,7 +682,10 @@ class EyeTracker():
         self.cam.closeCamera()
         self.vimba.shutdown()
         self.cam = None
-        self.nidaq = False
+        if self.nidaq:
+            self.nidaqDigInputs.clear()
+            self.nidaqDigOutputs.clear()
+            self.nidaq = False
         self.cameraMenuSettings.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
