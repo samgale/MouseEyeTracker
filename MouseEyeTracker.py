@@ -53,7 +53,7 @@ class EyeTracker():
         self.fileOpenSavePath = os.path.dirname(os.path.realpath(__file__))
         self.camSavePath = self.fileOpenSavePath
         self.camSaveBaseName = 'MouseEyeTracker'
-        self.nidaq = False
+        self.nidaq = None
         self.vimba = None
         self.cam = None
         self.camFrames = []
@@ -64,6 +64,7 @@ class EyeTracker():
         self.roi = None
         self.blurSigma = 2.0
         self.imgExponent = 2.0
+        self.showAllFrames = False
         self.stopTracking = False
         self.setDataNan = False
         self.pupilCenterSeed = None
@@ -137,7 +138,8 @@ class EyeTracker():
         self.cameraMenu = self.menuBar.addMenu('Camera')         
         self.cameraMenuUseCam = QtGui.QAction('Use Camera',self.mainWin,checkable=True)
         self.cameraMenuUseCam.triggered.connect(self.initCamera)
-        self.cameraMenu.addAction(self.cameraMenuUseCam)
+        self.cameraMenuShowAllFrames = QtGui.QAction('Show All Frames',self.mainWin,checkable=True)
+        self.cameraMenu.addActions([self.cameraMenuUseCam,self.cameraMenuShowAllFrames])
         
         self.cameraMenuSettings = self.cameraMenu.addMenu('Settings')
         self.cameraMenuSettings.setEnabled(False)
@@ -149,7 +151,8 @@ class EyeTracker():
         self.cameraMenuSettingsExposure.triggered.connect(self.setCamExposure)
         self.cameraMenuSettingsFrameRate = QtGui.QAction('Frame Rate',self.mainWin)
         self.cameraMenuSettingsFrameRate.triggered.connect(self.setCamFrameRate)
-        self.cameraMenuSettings.addActions([self.cameraMenuSettingsBufferSize,self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure,self.cameraMenuSettingsFrameRate])
+        self.cameraMenuSettingsItems = (self.cameraMenuSettingsBufferSize,self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure,self.cameraMenuSettingsFrameRate)
+        self.cameraMenuSettings.addActions(self.cameraMenuSettingsItems)
         
         self.cameraMenuNidaq = self.cameraMenu.addMenu('NIDAQ IO')
         self.cameraMenuNidaq.setEnabled(False)
@@ -638,16 +641,34 @@ class EyeTracker():
                 self.vimba.startup()
                 self.vimba.getSystem().runFeatureCommand("GeVDiscoveryAllOnce")
                 time.sleep(0.2)
-                cameraIds = self.vimba.getCameraIds()
-                selectedCam,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',cameraIds,editable=False)
-                if ok:
-                    self.cam = self.vimba.getCamera(selectedCam)
+                vimbaCams = self.vimba.getCameraIds()
             except:
-                traceback.print_exc()
-                raise Warning('Error initializing camera')
-            if self.cam is None:
                 if self.vimba is not None:
                     self.vimba.shutdown()
+                vimbaCams = []
+                raise Warning('Error initializing vimba')
+                traceback.print_exc()
+            webcams = []
+            i = 0
+            while True:
+                cam = cv2.VideoCapture(i)
+                isImage,image = cam.read()
+                if isImage:
+                    webcams.append('webcam'+str(i))
+                    i += 1
+                else:
+                    break
+            selectedCam,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',vimbaCams+webcams,editable=False)
+            if ok:
+                if selectedCam in vimbaCams:
+                    self.camType = 'vimba'
+                    self.cam = self.vimba.getCamera(selectedCam)
+                    self.cam.openCamera()
+                else:
+                    self.camType = 'webcam'
+                    self.cam = cv2.VideoCapture(int(selectedCam[6:]))
+                    self.cameraMenuShowAllFrames.setChecked(True)
+            if self.cam is None:
                 self.cameraMenuUseCam.setChecked(False)
             else:
                 try:
@@ -655,22 +676,29 @@ class EyeTracker():
                     deviceNames = nidaq.System().getDevNames()
                     selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
                     if ok:
+                        self.nidaq = selectedDevice
                         self.nidaqDigInputs = nidaq.DigitalInput(device=selectedDevice,port=0)
                         self.nidaqDigOutputs = nidaq.DigitalOutput(device=selectedDevice,port=1,initial_state='low')
                         self.nidaqInCh = 0
                         self.nidaqOutCh = 0
                         self.cameraMenuNidaq.setEnabled(True)
                         self.cameraMenuNidaqOut.setChecked(True)
-                        self.nidaq = True
                 except:
-                    traceback.print_exc()
+                    self.nidaq = None
                     raise Warning('Error initializing nidaq')
-                self.cam.openCamera()
+                    traceback.print_exc()
                 self.setCamProps()
                 self.dataPlotDur = self.defaultDataPlotDur
                 self.frameNum = 0
                 self.initDisplay()
+                if self.camType=='webcam':
+                    self.webcamDefaultFrameShape = self.image.shape
                 self.cameraMenuSettings.setEnabled(True)
+                for item in self.cameraMenuSettingsItems:
+                    if self.camType=='vimba' or item is self.cameraMenuSettingsBinning:
+                        item.setEnabled(True)
+                    else:
+                        item.setEnabled(False)
                 self.trackMenuMmPerPixMeasure.setEnabled(True)
                 if not self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setEnabled(True)
@@ -679,13 +707,17 @@ class EyeTracker():
             
     def closeCamera(self):
         self.turnOffButtons()
-        self.cam.closeCamera()
+        if self.camType=='vimba':
+            self.cam.closeCamera()
+        else:
+            self.cam.release()
         self.vimba.shutdown()
         self.cam = None
-        if self.nidaq:
+        if self.nidaq is not None:
             self.nidaqDigInputs.clear()
             self.nidaqDigOutputs.clear()
-            self.nidaq = False
+            self.nidaq = None
+        self.cameraMenuShowAllFrames.setChecked(False)
         self.cameraMenuSettings.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
@@ -693,57 +725,71 @@ class EyeTracker():
         
     def startCamera(self,bufferSize=1):
         self.cameraMenuSettings.setEnabled(False)
-        if self.nidaq:
+        if self.nidaq is not None:
             self.nidaqDigInputs.start()
             self.nidaqDigOutputs.start()
             self.nidaqDigOutputs.write(np.zeros(self.nidaqDigOutputs.no_lines,dtype=np.uint8))
-        for _ in range(bufferSize):
-            frame = self.cam.getFrame()
-            frame.announceFrame()
-            self.camFrames.append(frame)
-        self.cam.startCapture()
+        if self.camType=='vimba':
+            for _ in range(bufferSize):
+                frame = self.cam.getFrame()
+                frame.announceFrame()
+                self.camFrames.append(frame)
+            self.cam.startCapture()
         
     def stopCamera(self):
-        self.cam.runFeatureCommand("AcquisitionStop")
-        self.cam.endCapture()
-        self.cam.revokeAllFrames()
-        self.camFrames = []
+        if self.camType=='vimba':
+            self.cam.runFeatureCommand("AcquisitionStop")
+            self.cam.endCapture()
+            self.cam.revokeAllFrames()
+            self.camFrames = []
         if self.dataFileOut is not None:
             self.closeDataFileOut()
-        if self.nidaq:
+        if self.nidaq is not None:
             self.nidaqDigInputs.stop()
             self.nidaqDigOutputs.stop()
         self.cameraMenuSettings.setEnabled(True)
         
     def getCamImage(self):
         self.startCamera()
-        frame = self.camFrames[0]
-        frame.queueFrameCapture()
-        self.cam.runFeatureCommand("AcquisitionStart")
-        frame.waitFrameCapture()
-        self.image = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width))
+        if self.camType=='vimba':
+            frame = self.camFrames[0]
+            frame.queueFrameCapture()
+            self.cam.runFeatureCommand("AcquisitionStart")
+            frame.waitFrameCapture()
+            self.image = np.ndarray(buffer=frame.getBufferByteData(),dtype=np.uint8,shape=(frame.height,frame.width))
+        else:
+            isImage,image = self.cam.read()
+            self.image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
         self.stopCamera()
             
     def setCamProps(self):
-        self.frameRate = 60.0
-        self.camBufferSize = 60
-        self.camExposure = 0.9
-        self.cam.PixelFormat='Mono8'
-        self.cam.BinningHorizontal = 1
-        self.cam.BinningVertical = 1
-        self.cam.OffsetX = 0
-        self.cam.OffsetY = 0
-        self.cam.Width = self.cam.WidthMax
-        self.cam.Height = self.cam.HeightMax
-        self.cam.ExposureAuto = 'Off'
-        self.cam.ExposureTimeAbs = self.camExposure*1e6/self.frameRate
-        self.cam.AcquisitionFrameRateAbs = self.frameRate
-        self.cam.AcquisitionMode = 'Continuous'
-        self.cam.TriggerMode = 'Off'
-        self.cam.TriggerSource = 'FixedRate'
-        self.cam.SyncOutSelector = 'SyncOut2'
-        self.cam.SyncOutSource = 'Exposing'
-        self.cam.SyncOutPolarity = 'Normal'
+        self.camBinning = 1
+        if self.camType=='vimba':
+            self.frameRate = 60.0
+            self.camBufferSize = 60
+            self.camExposure = 0.9
+            self.cam.PixelFormat='Mono8'
+            self.cam.BinningHorizontal = 1
+            self.cam.BinningVertical = 1
+            self.cam.OffsetX = 0
+            self.cam.OffsetY = 0
+            self.cam.Width = self.cam.WidthMax
+            self.cam.Height = self.cam.HeightMax
+            self.cam.ExposureAuto = 'Off'
+            self.cam.ExposureTimeAbs = self.camExposure*1e6/self.frameRate
+            self.cam.AcquisitionFrameRateAbs = self.frameRate
+            self.cam.AcquisitionMode = 'Continuous'
+            self.cam.TriggerMode = 'Off'
+            self.cam.TriggerSource = 'FixedRate'
+            self.cam.SyncOutSelector = 'SyncOut2'
+            self.cam.SyncOutSource = 'Exposing'
+            self.cam.SyncOutPolarity = 'Normal'
+        else:
+            self.frameRate = np.nan
+            self.camBufferSize = None
+            self.cam.set(cv2.CAP_PROP_EXPOSURE,-6.0)
+            self.cam.set(cv2.CAP_PROP_BRIGHTNESS,149.0)
+            self.cam.set(cv2.CAP_PROP_CONTRAST,5.0)
         
     def setCamBufferSize(self):
         val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
@@ -752,10 +798,10 @@ class EyeTracker():
         self.camBufferSize = val
             
     def setCamBinning(self):
-        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.cam.BinningHorizontal,min=1,max=8)
+        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.camBinning,min=1,max=8)
         if not ok:
             return
-        scaleFactor = self.cam.BinningHorizontal/val
+        scaleFactor = self.camBinning/val
         if self.pupilCenterSeed is not None:
             self.pupilCenterSeed = [int(n*scaleFactor) for n in self.pupilCenterSeed]
         if self.reflectCenterSeed is not None:
@@ -771,8 +817,14 @@ class EyeTracker():
                 roi.setPos([int(n*scaleFactor) for n in roi.pos()])
                 roi.setSize([int(n*scaleFactor) for n in roi.size()])
             self.updateMaskIndex()
-        self.cam.BinningHorizontal = val
-        self.cam.BinningVertical = val
+        self.camBinning = val
+        if self.camType=='vimba':
+            self.cam.BinningHorizontal = val
+            self.cam.BinningVertical = val
+        else:
+            h,w = [int(n/val) for n in self.webcamDefaultFrameShape]
+            self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT,h)
+            self.cam.set(cv2.CAP_PROP_FRAME_WIDTH,w)
         self.resetROI()
         self.resetImage()
     
@@ -818,10 +870,10 @@ class EyeTracker():
         else:
             isImage,image = self.video.read()
             self.image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-            if self.trackMenuBlurImage.isChecked():
-                self.blurImage()
-            if self.trackMenuExpImage.isChecked():
-                self.exponentiateImage()
+        if self.trackMenuBlurImage.isChecked():
+            self.blurImage()
+        if self.trackMenuExpImage.isChecked():
+            self.exponentiateImage()
                 
     def blurImage(self):
         self.image = cv2.GaussianBlur(self.image,(0,0),self.blurSigma)
@@ -864,18 +916,20 @@ class EyeTracker():
     def initDisplay(self):
         self.resetROI()
         self.resetImage()
-        self.setDataPlotTime()
-        self.resetPupilData()
-        self.resetPupilDataPlot()        
-        self.setDataPlotXRange()
-        self.trackMenu.setEnabled(True)
+        if not np.isnan(self.frameRate):
+            self.setDataPlotTime()
+            self.resetPupilData()
+            self.resetPupilDataPlot()        
+            self.setDataPlotXRange()
+            self.trackMenu.setEnabled(True)
                
     def resetROI(self):
         if self.cam is not None:
-            self.cam.OffsetX = 0
-            self.cam.OffsetY = 0
-            self.cam.Width = self.cam.WidthMax
-            self.cam.Height = self.cam.HeightMax
+            if self.camType=='vimba':
+                self.cam.OffsetX = 0
+                self.cam.OffsetY = 0
+                self.cam.Width = self.cam.WidthMax
+                self.cam.Height = self.cam.HeightMax
             self.getCamImage()
         self.roiPos = (0,0)
         self.roiSize = (self.image.shape[1],self.image.shape[0])
@@ -944,49 +998,56 @@ class EyeTracker():
                     self.frameNum += 1
                     self.frameNumSpinBox.setValue(self.frameNum)
                     self.getVideoImage()
-                    self.updateDisplay()
+                    self.updateDisplay(showAll=self.cameraMenuShowAllFrames.isChecked())
                     self.app.processEvents()
             else:
                 self.frameNum = 0
-                self.resetPupilData()
                 self.startCamera(bufferSize=self.camBufferSize)
-                for frame in self.camFrames:
-                    frame.queueFrameCapture(frameCallback=camFrameCaptured)
-                self.cam.runFeatureCommand("AcquisitionStart")
+                if self.camType=='vimba':
+                    self.resetPupilData()
+                    for frame in self.camFrames:
+                        frame.queueFrameCapture(frameCallback=camFrameCaptured)
+                    self.cam.runFeatureCommand("AcquisitionStart")
+                else:
+                    while self.startVideoButton.isChecked():
+                        isImage,image = self.cam.read()
+                        image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+                        self.processCamFrame(image,time.clock())
+                        self.app.processEvents()
         else:
             if self.cam is not None:
                 self.stopCamera()
-            self.updateDisplay(updateAll=True)
+            self.updateDisplay(showAll=True)
             if self.cam is None:
                 self.frameNumSpinBox.blockSignals(False)
             self.startVideoButton.setText('Start Video')
             
-    def updateDisplay(self,updateNone=False,updateAll=False):
+    def updateDisplay(self,showAll=False,showNone=False):
         n = (self.frameNum-1)%5
-        if updateAll or (not updateNone and n==0):
+        if showAll or (not showNone and n==0):
             self.imageItem.setImage(self.image[self.roiInd].T,autoLevels=False,autoDownsample=True)
         if self.cam is None:
             self.selectedSaccade = None
-        else:
+        elif self.camType=='vimba':
             if self.dataPlotIndex==self.numDataPlotPts-1:
                 self.dataPlotIndex = 0
             else:
                 self.dataPlotIndex += 1
         if not self.stopTracking and (self.setDataNan or self.reflectCenterSeed is not None):
             self.trackReflect()
-            if updateAll or (not updateNone and n==1):
+            if showAll or (not showNone and n==1):
                 if self.reflectFound:
                     self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
                 else:
                     self.reflectCenterPlot.setData(x=[],y=[])
         if not self.stopTracking and (self.setDataNan or self.pupilCenterSeed is not None):
             self.trackPupil()
-            if updateAll or (not updateNone and n==1):
+            if showAll or (not showNone and n==1):
                 self.updatePupilPlot()
         if self.pupilCenterSeed is not None or self.dataIsLoaded:
-            if updateAll:
+            if showAll:
                 self.updatePupilDataPlot()
-            elif not updateNone and n>1:
+            elif not showNone and n>1:
                 updatePlotN = [False,False,False]
                 updatePlotN[n-2] = True
                 self.updatePupilDataPlot(updatePlotN)
@@ -996,7 +1057,8 @@ class EyeTracker():
     def processCamFrame(self,img,timestamp):
         self.frameNum += 1
         self.image = img
-        skipDisplayUpdate = False
+        showAll = False
+        showNone = False
         if (self.saveCheckBox.isChecked() and not self.cameraMenuNidaqIn.isChecked()) or (self.cameraMenuNidaqIn.isChecked() and not self.nidaqDigInputs.read()[self.nidaqInCh]):
             if self.dataFileOut is None:
                 self.frameNum = 0
@@ -1005,16 +1067,19 @@ class EyeTracker():
                 self.dataFileOut = h5py.File(os.path.join(self.camSavePath,self.camSaveBaseName+'_'+time.strftime('%Y%m%d_%H%M%S.hdf5')),'w',libver='latest')
                 self.dataFileOut.attrs.create('frameRate',self.frameRate)
                 self.dataFileOut.attrs.create('mmPerPixel',self.mmPerPixel)
-                skipDisplayUpdate = True
+                showNone = True
             else:
                 self.nidaqDigOutputs.writeBit(self.nidaqOutCh,1)
+                if self.camType=='vimba':
+                    timestamp /= self.cam.GevTimestampTickFrequency
                 dataset = self.dataFileOut.create_dataset(str(self.frameNum),data=self.image,chunks=self.image.shape,compression='gzip',compression_opts=1)
-                dataset.attrs.create('acquisitionTime',timestamp/self.cam.GevTimestampTickFrequency)
+                dataset.attrs.create('acquisitionTime',timestamp)
                 self.nidaqDigOutputs.writeBit(self.nidaqOutCh,0)
+                showAll = self.cameraMenuShowAllFrames.isChecked()
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
-            skipDisplayUpdate = True
-        self.updateDisplay(updateNone=skipDisplayUpdate)       
+            showNone = True
+        self.updateDisplay(showAll,showNone)       
         
     def closeDataFileOut(self):
         self.dataFileOut.attrs.create('numFrames',self.frameNum-1)
@@ -1276,14 +1341,16 @@ class EyeTracker():
                 for roi in self.maskRoi:
                     roi.setPos((roi.pos()[0]-self.roiPos[0],roi.pos()[1]-self.roiPos[1]))
                 self.updateMaskIndex()       
-            if self.cam is None:
+            if self.cam is None or self.camType=='webcam':
                 self.roiInd = np.s_[self.roiPos[1]:self.roiPos[1]+self.roiSize[1],self.roiPos[0]:self.roiPos[0]+self.roiSize[0]]
             else:
                 self.roiInd = np.s_[0:self.roiSize[1],0:self.roiSize[0]]
-                self.cam.OffsetX = self.roiPos[0]
-                self.cam.OffsetY = self.roiPos[1]
-                self.cam.Width = self.roiSize[0]
-                self.cam.Height = self.roiSize[1]
+            if self.cam is not None:
+                if self.camType=='vimba':
+                    self.cam.OffsetX = self.roiPos[0]
+                    self.cam.OffsetY = self.roiPos[1]
+                    self.cam.Width = self.roiSize[0]
+                    self.cam.Height = self.roiSize[1]
                 self.getCamImage()
             self.roi.setVisible(False)
             self.resetImage()
@@ -1898,7 +1965,7 @@ class EyeTracker():
         if self.video is not None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         self.getVideoImage()
-        self.updateDisplay(updateAll=True)
+        self.updateDisplay(showAll=True)
     
     def changePlotWindowDur(self,fullRange=False):
         if fullRange:
@@ -1949,10 +2016,10 @@ class EyeTracker():
             self.frameNum += 1
             self.getVideoImage()
             if self.frameNum==self.numFrames:
-                self.updateDisplay(updateAll=True)
+                self.updateDisplay(showAll=True)
                 self.changePlotWindowDur(fullRange=True)
             else:
-                self.updateDisplay(updateNone=True)
+                self.updateDisplay(showNone=True)
         
     def pixToDeg(self):
         pupilEllipseRadius = (self.pupilArea/math.pi)**0.5
