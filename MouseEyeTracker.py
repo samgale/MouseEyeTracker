@@ -667,7 +667,6 @@ class EyeTracker():
                 else:
                     self.camType = 'webcam'
                     self.cam = cv2.VideoCapture(int(selectedCam[6:]))
-                    self.cameraMenuShowAllFrames.setChecked(True)
             if self.cam is None:
                 self.cameraMenuUseCam.setChecked(False)
             else:
@@ -693,9 +692,10 @@ class EyeTracker():
                 self.initDisplay()
                 if self.camType=='webcam':
                     self.webcamDefaultFrameShape = self.image.shape
+                self.cameraMenuShowAllFrames.setChecked(True)
                 self.cameraMenuSettings.setEnabled(True)
                 for item in self.cameraMenuSettingsItems:
-                    if self.camType=='vimba' or item is self.cameraMenuSettingsBinning:
+                    if self.camType=='vimba' or item in (self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure):
                         item.setEnabled(True)
                     else:
                         item.setEnabled(False)
@@ -787,6 +787,7 @@ class EyeTracker():
         else:
             self.frameRate = np.nan
             self.camBufferSize = None
+            self.camExposure = 1000*(2**-6)
             self.cam.set(cv2.CAP_PROP_EXPOSURE,-6.0)
             self.cam.set(cv2.CAP_PROP_BRIGHTNESS,149.0)
             self.cam.set(cv2.CAP_PROP_CONTRAST,5.0)
@@ -829,11 +830,22 @@ class EyeTracker():
         self.resetImage()
     
     def setCamExposure(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Camera Exposure','Fraction of frame interval:',value=self.camExposure,min=0.01,max=0.99,decimals=2)
+        if self.camType=='vimba':
+            units = 'Fraction of frame interval:'
+            minVal = 0.001
+            maxVal = 0.99
+        else:
+            units = 'Exposure time (ms):'
+            minVal = 0.001
+            maxVal = 10000
+        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Camera Exposure',units,value=self.camExposure,min=minVal,max=maxVal,decimals=3)
         if not ok:
             return
         self.camExposure = val
-        self.cam.ExposureTimeAbs = self.camExposure*1e6/self.frameRate
+        if self.camType=='vimba':
+            self.cam.ExposureTimeAbs = self.camExposure*1e6/self.frameRate
+        else:
+            self.cam.set(cv2.CAP_PROP_EXPOSURE,math.log(val/1000,2))
     
     def setCamFrameRate(self):
         val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Camera Frame Rate','Frames/s:',value=self.frameRate,min=0.01,max=119.30,decimals=2)
