@@ -543,7 +543,7 @@ class EyeTracker():
             self.frameTimes = self.dataFileIn['frameTimes'][:]
             self.frameTimes -= self.frameTimes[0]
             if np.isnan(self.frameRate):
-                self.frameRate = self.frameTimes[-1]/self.numFrames
+                self.frameRate = self.numFrames/self.frameTimes[-1]
         else:
             self.video = cv2.VideoCapture(filePath)
             self.frameRate = self.video.get(cv2.CAP_PROP_FPS)
