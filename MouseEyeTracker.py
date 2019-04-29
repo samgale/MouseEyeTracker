@@ -443,7 +443,7 @@ class EyeTracker():
         startFrame,endFrame = self.getFrameSaveRange()
         if startFrame is None:
             return
-        frameData = np.zeros((self.roiSize[1],self.roiSize[0],endFrame-startFrame+1),dtype=self.image.dtype)
+        frameData = np.zeros((endFrame-startFrame+1,self.roiSize[1],self.roiSize[0]),dtype=self.image.dtype)
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for i,frame in enumerate(range(startFrame,endFrame+1)):
@@ -451,8 +451,8 @@ class EyeTracker():
                 isImage,image = self.video.read()
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
-                image = self.dataFileIn[str(frame)][:,:]
-            frameData[:,:,i] = image[self.roiInd]
+                image = self.dataFileIn['frame'][frame-1]
+            frameData[i] = image[self.roiInd]
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         data = {'frameData': frameData}
@@ -475,8 +475,6 @@ class EyeTracker():
         self.reflectCenter += self.roiPos
         self.pupilCenter += self.roiPos
         params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
-        if self.dataFileIn is not None:
-            self.getFrameTimes()
         if fileType=='hdf5':
             dataFile = h5py.File(filePath,'w',libver='latest')
             dataFile.attrs.create('mmPerPixel',self.mmPerPixel)
@@ -506,7 +504,7 @@ class EyeTracker():
                 isImage,image = self.video.read()
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
-                image = self.dataFileIn[str(frame)][:,:]
+                image = self.dataFileIn['frame'][frame-1]
             vidOut.write(image[self.roiInd])
         vidOut.release()
         if self.dataFileIn is None:
@@ -540,21 +538,18 @@ class EyeTracker():
         if os.path.splitext(os.path.basename(filePath))[1]=='.hdf5':
             self.dataFileIn = h5py.File(filePath,'r')
             self.frameRate = self.dataFileIn.attrs.get('frameRate')
-            if 'numFrames' in self.dataFileIn.attrs.keys():
-                self.numFrames = self.dataFileIn.attrs.get('numFrames')
-            else:
-                self.numFrames = sum(1 for _ in self.dataFileIn.keys())
-            if 'mmPerPixel' in self.dataFileIn.attrs.keys():
-                self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
+            self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
+            self.numFrames = self.dataFileIn['frames'].shape[0]
+            self.frameTimes = self.dataFileIn['frameTimes'][:]
+            self.frameTimes -= self.frameTimes[0]
+            if np.isnan(self.frameRate):
+                self.frameRate = self.frameTimes[-1]/self.numFrames
         else:
             self.video = cv2.VideoCapture(filePath)
             self.frameRate = self.video.get(cv2.CAP_PROP_FPS)
+            self.mmPerPixel = np.nan
             self.numFrames = int(round(self.video.get(cv2.CAP_PROP_FRAME_COUNT)))
-        self.frameTimes = np.full(self.numFrames,np.nan)
-        if self.defaultDataPlotDur>self.numFrames/self.frameRate:
-            self.dataPlotDur = self.numFrames/self.frameRate
-        else:
-            self.dataPlotDur = self.defaultDataPlotDur
+            self.frameTimes = np.nan
         self.frameNumSpinBox.setRange(1,self.numFrames)
         self.frameNumSpinBox.setValue(1)
         self.frameNumSpinBox.setSuffix(' of '+str(self.numFrames))
@@ -566,7 +561,6 @@ class EyeTracker():
         for line in self.frameNumLines:
             line.setBounds((0,(self.numFrames-1)/self.frameRate))
         self.addFrameNumLines()
-        self.plotDurEdit.setText(str(round(self.dataPlotDur,3)))
         self.frameNum = 1
         self.getVideoImage()
         self.initDisplay()
@@ -646,8 +640,7 @@ class EyeTracker():
                 if self.vimba is not None:
                     self.vimba.shutdown()
                 vimbaCams = []
-                raise Warning('Error initializing vimba')
-                traceback.print_exc()
+                print('Unable to initialize vimba')
             webcams = []
             i = 0
             while True:
@@ -684,10 +677,8 @@ class EyeTracker():
                         self.cameraMenuNidaqOut.setChecked(True)
                 except:
                     self.nidaq = None
-                    raise Warning('Error initializing nidaq')
-                    traceback.print_exc()
+                    print('Unable to initialize nidaq')
                 self.setCamProps()
-                self.dataPlotDur = self.defaultDataPlotDur
                 self.frameNum = 0
                 self.initDisplay()
                 if self.camType=='webcam':
@@ -709,9 +700,9 @@ class EyeTracker():
         self.turnOffButtons()
         if self.camType=='vimba':
             self.cam.closeCamera()
+            self.vimba.shutdown()
         else:
             self.cam.release()
-        self.vimba.shutdown()
         self.cam = None
         if self.nidaq is not None:
             self.nidaqDigInputs.clear()
@@ -787,10 +778,8 @@ class EyeTracker():
         else:
             self.frameRate = np.nan
             self.camBufferSize = None
-            self.camExposure = 1000*(2**-6)
-            self.cam.set(cv2.CAP_PROP_EXPOSURE,-6.0)
-            self.cam.set(cv2.CAP_PROP_BRIGHTNESS,149.0)
-            self.cam.set(cv2.CAP_PROP_CONTRAST,5.0)
+            self.camExposure = 1
+            self.cam.set(cv2.CAP_PROP_EXPOSURE,math.log(self.camExposure/1000,2))
         
     def setCamBufferSize(self):
         val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
@@ -876,9 +865,7 @@ class EyeTracker():
                     
     def getVideoImage(self):
         if self.dataFileIn is not None:
-            self.image = self.dataFileIn[str(self.frameNum)][:,:]
-            if np.isnan(self.frameTimes[self.frameNum-1]):
-                self.frameTimes[self.frameNum-1] = self.dataFileIn[str(self.frameNum)].attrs.get('acquisitionTime')
+            self.image = self.dataFileIn['frames'][self.frameNum-1]
         else:
             isImage,image = self.video.read()
             self.image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
@@ -928,12 +915,12 @@ class EyeTracker():
     def initDisplay(self):
         self.resetROI()
         self.resetImage()
-        if not np.isnan(self.frameRate):
-            self.setDataPlotTime()
-            self.resetPupilData()
-            self.resetPupilDataPlot()        
-            self.setDataPlotXRange()
-            self.trackMenu.setEnabled(True)
+        self.setDataPlotDur()
+        self.setDataPlotTime()
+        self.resetPupilData()
+        self.resetPupilDataPlot()        
+        self.setDataPlotXRange()
+        self.trackMenu.setEnabled(True)
                
     def resetROI(self):
         if self.cam is not None:
@@ -949,7 +936,7 @@ class EyeTracker():
         self.roiInd = np.s_[0:self.roiSize[1],0:self.roiSize[0]]
         
     def resetImage(self):
-        self.imageItem.setImage(self.image[self.roiInd].T,autoLevels=False,autoDownSample=True)
+        self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
         self.imageViewBox.autoRange(items=[self.imageItem])
         if self.pupilCenterSeed is not None:
             self.pupilCenterPlot.setData(x=[self.pupilCenterSeed[0]],y=[self.pupilCenterSeed[1]])
@@ -1037,7 +1024,7 @@ class EyeTracker():
     def updateDisplay(self,showAll=False,showNone=False):
         n = (self.frameNum-1)%5
         if showAll or (not showNone and n==0):
-            self.imageItem.setImage(self.image[self.roiInd].T,autoLevels=False,autoDownsample=True)
+            self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
         if self.cam is None:
             self.selectedSaccade = None
         elif self.camType=='vimba':
@@ -1071,7 +1058,7 @@ class EyeTracker():
         self.image = img
         showAll = False
         showNone = False
-        if (self.saveCheckBox.isChecked() and not self.cameraMenuNidaqIn.isChecked()) or (self.cameraMenuNidaqIn.isChecked() and not self.nidaqDigInputs.read()[self.nidaqInCh]):
+        if self.saveCheckBox.isChecked() or (self.cameraMenuNidaqIn.isChecked() and self.nidaqDigInputs.read()[self.nidaqInCh]):
             if self.dataFileOut is None:
                 self.frameNum = 0
                 if self.cameraMenuNidaqIn.isChecked():
@@ -1079,14 +1066,21 @@ class EyeTracker():
                 self.dataFileOut = h5py.File(os.path.join(self.camSavePath,self.camSaveBaseName+'_'+time.strftime('%Y%m%d_%H%M%S.hdf5')),'w',libver='latest')
                 self.dataFileOut.attrs.create('frameRate',self.frameRate)
                 self.dataFileOut.attrs.create('mmPerPixel',self.mmPerPixel)
+                imgShape = tuple(self.roiSize[::-1])
+                self.frameDataset = self.dataFileOut.create_dataset('frames',(0,)+imgShape,maxshape=(None,)+imgShape,dtype=img.dtype,chunks=(1,)+imgShape,compression='gzip',compression_opts=1)
+                self.frameTimeDataset = self.dataFileOut.create_dataset('frameTimes',(0,),maxshape=(None,),dtype=float)
                 showNone = True
             else:
-                self.nidaqDigOutputs.writeBit(self.nidaqOutCh,1)
+                if self.nidaq is not None:
+                    self.nidaqDigOutputs.writeBit(self.nidaqOutCh,1)
                 if self.camType=='vimba':
                     timestamp /= self.cam.GevTimestampTickFrequency
-                dataset = self.dataFileOut.create_dataset(str(self.frameNum),data=self.image,chunks=self.image.shape,compression='gzip',compression_opts=1)
-                dataset.attrs.create('acquisitionTime',timestamp)
-                self.nidaqDigOutputs.writeBit(self.nidaqOutCh,0)
+                self.frameDataset.resize(self.frameNum,axis=0)
+                self.frameDataset[-1] = img[self.roiInd]
+                self.frameTimeDataset.resize(self.frameNum,axis=0)
+                self.frameTimeDataset[-1] = timestamp
+                if self.nidaq is not None:
+                    self.nidaqDigOutputs.writeBit(self.nidaqOutCh,0)
                 showAll = self.cameraMenuShowAllFrames.isChecked()
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
@@ -1094,7 +1088,6 @@ class EyeTracker():
         self.updateDisplay(showAll,showNone)       
         
     def closeDataFileOut(self):
-        self.dataFileOut.attrs.create('numFrames',self.frameNum-1)
         self.dataFileOut.close()
         self.dataFileOut = None
         self.frameNum = 0
@@ -1984,10 +1977,16 @@ class EyeTracker():
             newVal = self.numFrames/self.frameRate
         else:
             newVal = float(self.plotDurEdit.text())
-            if newVal<3/self.frameRate:
-                newVal = 3/self.frameRate
-            elif self.cam is None and newVal>self.numFrames/self.frameRate:
-                newVal = self.numFrames/self.frameRate
+            if self.cam is None:
+                if newVal<3/self.frameRate:
+                    newVal = 3/self.frameRate
+                elif newVal>self.numFrames/self.frameRate:
+                    newVal = self.numFrames/self.frameRate
+            else:
+                if np.isnan(self.frameRate):
+                    newVal = 3 if newVal<3 else int(newVal)
+                elif newVal<3/self.frameRate:
+                    newVal = 3/self.frameRate
         self.plotDurEdit.setText(str(round(newVal,3)))
         self.dataPlotDur = newVal
         if self.cam is not None:
@@ -1998,9 +1997,22 @@ class EyeTracker():
             self.resetPupilDataPlot()
         else:
             self.updatePupilDataPlot()
+
+    def setDataPlotDur(self):
+        self.dataPlotDur = self.defaultDataPlotDur
+        self.pupilYPlotItem.setLabel('bottom','Time (s)')
+        if np.isnan(self.frameRate):
+            self.dataPlotDur = 60
+            self.pupilYPlotItem.setLabel('bottom','Frame')
+        elif self.cam is None and self.defaultDataPlotDur>self.numFrames/self.frameRate:
+            self.dataPlotDur = self.numFrames/self.frameRate   
+        self.plotDurEdit.setText(str(round(self.dataPlotDur,3)))
             
     def setDataPlotTime(self):
-        self.dataPlotTime = np.arange(0,self.dataPlotDur-0.5/self.frameRate,1/self.frameRate)
+        if np.isnan(self.frameRate):
+            self.dataPlotTime = np.arange(self.dataPlotDur)
+        else:
+            self.dataPlotTime = np.arange(0,self.dataPlotDur-0.5/self.frameRate,1/self.frameRate)
         self.numDataPlotPts = self.dataPlotTime.size
         
     def setMmPerPix(self):
@@ -2046,9 +2058,8 @@ class EyeTracker():
         self.updatePupilDataPlot()
     
     def plotFrameIntervals(self):
-        if all(np.isnan(self.frameTimes)):
+        if np.all(np.isnan(self.frameTimes)):
             return
-        self.getFrameTimes()
         frameIntervals = np.diff(self.frameTimes)*1e3
         plt.figure()
         plt.plot(range(2,self.numFrames+1),frameIntervals)
@@ -2056,11 +2067,6 @@ class EyeTracker():
         plt.xlabel('Frame Number')
         plt.ylabel('Frame Interval (ms)')
         plt.show()
-        
-    def getFrameTimes(self):
-        for i in np.where(np.isnan(self.frameTimes))[0]:
-            self.frameTimes[i] = self.dataFileIn[str(i+1)].attrs.get('acquisitionTime')
-        self.frameTimes -= self.frameTimes[0]
         
     def findSaccades(self):
         # find peaks in pupil velocity
@@ -2079,10 +2085,9 @@ class EyeTracker():
         self.plotSaccades()
         
     def getPupilVelocity(self):
-        if all(np.isnan(self.frameTimes)):
+        if np.all(np.isnan(frameTimes)):
             t = np.arange(self.numFrames)/self.frameRate
         else:
-            self.getFrameTimes()
             t = self.frameTimes
         n = self.saccadeSmoothPts//2
         vel = np.diff(self.pupilX)/np.diff(t)
