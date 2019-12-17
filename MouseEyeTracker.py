@@ -6,14 +6,15 @@ Acquire data with camera or analyze data from hdf5 or video file
 @author: samgale
 """
 
+from __future__ import division
 import sip
 sip.setapi('QString', 2)
-import h5py, math, os, time, traceback
+import h5py, math, os, time
 import cv2
 import numpy as np
 import scipy.io
 import scipy.signal
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 from matplotlib import pyplot as plt
 
@@ -38,9 +39,9 @@ def camFrameCaptured(frame):
 
 
 def start():
-    app = QtGui.QApplication.instance()
+    app = QtWidgets.QApplication.instance()
     if app is None:
-        app = QtGui.QApplication([])
+        app = QtWidgets.QApplication([])
     eyeTrackerObj = EyeTracker(app)
     qtSignalGeneratorObj.camFrameCapturedSignal.connect(eyeTrackerObj.processCamFrame)
     app.exec_()
@@ -91,12 +92,12 @@ class EyeTracker():
         # main window
         winWidth = 1000
         winHeight = 500
-        self.mainWin = QtGui.QMainWindow()
+        self.mainWin = QtWidgets.QMainWindow()
         self.mainWin.setWindowTitle('MouseEyeTracker')
         self.mainWin.keyPressEvent = self.mainWinKeyPressEvent
         self.mainWin.closeEvent = self.mainWinCloseEvent
         self.mainWin.resize(winWidth,winHeight)
-        screenCenter = QtGui.QDesktopWidget().availableGeometry().center()
+        screenCenter = QtWidgets.QDesktopWidget().availableGeometry().center()
         mainWinRect = self.mainWin.frameGeometry()
         mainWinRect.moveCenter(screenCenter)
         self.mainWin.move(mainWinRect.topLeft())
@@ -106,141 +107,141 @@ class EyeTracker():
         self.menuBar.setNativeMenuBar(False)
         self.fileMenu = self.menuBar.addMenu('File')
         self.fileMenuOpen = self.fileMenu.addMenu('Open')
-        self.fileMenuOpenFrames = QtGui.QAction('Frame Data',self.mainWin)
+        self.fileMenuOpenFrames = QtWidgets.QAction('Frame Data',self.mainWin)
         self.fileMenuOpenFrames.triggered.connect(self.loadFrameData)
-        self.fileMenuOpenData = QtGui.QAction('Tracking Data',self.mainWin,enabled=False)
+        self.fileMenuOpenData = QtWidgets.QAction('Tracking Data',self.mainWin,enabled=False)
         self.fileMenuOpenData.triggered.connect(self.loadTrackingData)
         self.fileMenuOpen.addActions([self.fileMenuOpenFrames,self.fileMenuOpenData])
         
         self.fileMenuSave = self.fileMenu.addMenu('Save')
         self.fileMenuSave.setEnabled(False)
         self.fileMenuSaveFrames = self.fileMenuSave.addMenu('Frame Data')
-        self.fileMenuSaveFramesNpz = QtGui.QAction('npz',self.mainWin)
+        self.fileMenuSaveFramesNpz = QtWidgets.QAction('npz',self.mainWin)
         self.fileMenuSaveFramesNpz.triggered.connect(self.saveFrameData)
-        self.fileMenuSaveFramesMat = QtGui.QAction('mat',self.mainWin)
+        self.fileMenuSaveFramesMat = QtWidgets.QAction('mat',self.mainWin)
         self.fileMenuSaveFramesMat.triggered.connect(self.saveFrameData)
         self.fileMenuSaveFrames.addActions([self.fileMenuSaveFramesNpz,self.fileMenuSaveFramesMat])
         self.fileMenuSaveData = self.fileMenuSave.addMenu('Tracking Data')
-        self.fileMenuSaveDataHdf5 = QtGui.QAction('hdf5',self.mainWin)
+        self.fileMenuSaveDataHdf5 = QtWidgets.QAction('hdf5',self.mainWin)
         self.fileMenuSaveDataHdf5.triggered.connect(self.saveTrackingData)
-        self.fileMenuSaveDataNpz = QtGui.QAction('npz',self.mainWin)
+        self.fileMenuSaveDataNpz = QtWidgets.QAction('npz',self.mainWin)
         self.fileMenuSaveDataNpz.triggered.connect(self.saveTrackingData)
-        self.fileMenuSaveDataMat = QtGui.QAction('mat',self.mainWin)
+        self.fileMenuSaveDataMat = QtWidgets.QAction('mat',self.mainWin)
         self.fileMenuSaveDataMat.triggered.connect(self.saveTrackingData)
         self.fileMenuSaveData.addActions([self.fileMenuSaveDataHdf5,self.fileMenuSaveDataNpz,self.fileMenuSaveDataMat])
-        self.fileMenuSaveMovie = QtGui.QAction('Movie',self.mainWin)
+        self.fileMenuSaveMovie = QtWidgets.QAction('Movie',self.mainWin)
         self.fileMenuSaveMovie.triggered.connect(self.saveMovie)
-        self.fileMenuSaveAnnotatedMovie = QtGui.QAction('Annotated Movie',self.mainWin,enabled=False)
+        self.fileMenuSaveAnnotatedMovie = QtWidgets.QAction('Annotated Movie',self.mainWin,enabled=False)
         self.fileMenuSaveAnnotatedMovie.triggered.connect(self.saveMovie)
         self.fileMenuSave.addActions([self.fileMenuSaveMovie,self.fileMenuSaveAnnotatedMovie])
         
         # camera menu
         self.cameraMenu = self.menuBar.addMenu('Camera')         
-        self.cameraMenuUseCam = QtGui.QAction('Use Camera',self.mainWin,checkable=True)
+        self.cameraMenuUseCam = QtWidgets.QAction('Use Camera',self.mainWin,checkable=True)
         self.cameraMenuUseCam.triggered.connect(self.initCamera)
-        self.cameraMenuShowAllFrames = QtGui.QAction('Show All Frames',self.mainWin,checkable=True)
+        self.cameraMenuShowAllFrames = QtWidgets.QAction('Show All Frames',self.mainWin,checkable=True)
         self.cameraMenu.addActions([self.cameraMenuUseCam,self.cameraMenuShowAllFrames])
         
         self.cameraMenuSettings = self.cameraMenu.addMenu('Settings')
         self.cameraMenuSettings.setEnabled(False)
-        self.cameraMenuSettingsBufferSize = QtGui.QAction('Buffer Size',self.mainWin)
+        self.cameraMenuSettingsBufferSize = QtWidgets.QAction('Buffer Size',self.mainWin)
         self.cameraMenuSettingsBufferSize.triggered.connect(self.setCamBufferSize)
-        self.cameraMenuSettingsBinning = QtGui.QAction('Spatial Binning',self.mainWin)
+        self.cameraMenuSettingsBinning = QtWidgets.QAction('Spatial Binning',self.mainWin)
         self.cameraMenuSettingsBinning.triggered.connect(self.setCamBinning)
-        self.cameraMenuSettingsExposure = QtGui.QAction('Exposure',self.mainWin)
+        self.cameraMenuSettingsExposure = QtWidgets.QAction('Exposure',self.mainWin)
         self.cameraMenuSettingsExposure.triggered.connect(self.setCamExposure)
-        self.cameraMenuSettingsFrameRate = QtGui.QAction('Frame Rate',self.mainWin)
+        self.cameraMenuSettingsFrameRate = QtWidgets.QAction('Frame Rate',self.mainWin)
         self.cameraMenuSettingsFrameRate.triggered.connect(self.setCamFrameRate)
         self.cameraMenuSettingsItems = (self.cameraMenuSettingsBufferSize,self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure,self.cameraMenuSettingsFrameRate)
         self.cameraMenuSettings.addActions(self.cameraMenuSettingsItems)
         
         self.cameraMenuNidaq = self.cameraMenu.addMenu('NIDAQ IO')
         self.cameraMenuNidaq.setEnabled(False)
-        self.cameraMenuNidaqIn = QtGui.QAction('Use Save Trigger (NIDAQ Input P0.0)',self.mainWin,checkable=True)
+        self.cameraMenuNidaqIn = QtWidgets.QAction('Use Save Trigger (NIDAQ Input P0.0)',self.mainWin,checkable=True)
         self.cameraMenuNidaqIn.triggered.connect(self.setNidaqIO)
-        self.cameraMenuNidaqOut = QtGui.QAction('Signal Saved Frames (NIDAQ Output P1.0)',self.mainWin,checkable=True)
+        self.cameraMenuNidaqOut = QtWidgets.QAction('Signal Saved Frames (NIDAQ Output P1.0)',self.mainWin,checkable=True)
         self.cameraMenuNidaqOut.triggered.connect(self.setNidaqIO)
         self.cameraMenuNidaq.addActions([self.cameraMenuNidaqIn,self.cameraMenuNidaqOut])
         
-        self.cameraMenuSavePath = QtGui.QAction('Save Path',self.mainWin)
+        self.cameraMenuSavePath = QtWidgets.QAction('Save Path',self.mainWin)
         self.cameraMenuSavePath.triggered.connect(self.setCamSavePath)
-        self.cameraMenuSaveBaseName = QtGui.QAction('Save Basename',self.mainWin)
+        self.cameraMenuSaveBaseName = QtWidgets.QAction('Save Basename',self.mainWin)
         self.cameraMenuSaveBaseName.triggered.connect(self.setCamSaveBaseName)
         self.cameraMenu.addActions([self.cameraMenuSavePath,self.cameraMenuSaveBaseName])
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
         self.trackMenu.setEnabled(False)
-        self.trackMenuStopTracking = QtGui.QAction('Stop Tracking',self.mainWin,checkable=True)
+        self.trackMenuStopTracking = QtWidgets.QAction('Stop Tracking',self.mainWin,checkable=True)
         self.trackMenuStopTracking.triggered.connect(self.toggleStopTracking)
-        self.trackMenuSetDataNan = QtGui.QAction('Set Data NaN',self.mainWin,checkable=True)
+        self.trackMenuSetDataNan = QtWidgets.QAction('Set Data NaN',self.mainWin,checkable=True)
         self.trackMenuSetDataNan.triggered.connect(self.toggleSetDataNan)
         self.trackMenu.addActions([self.trackMenuStopTracking,self.trackMenuSetDataNan])
         
         self.trackMenuMmPerPix = self.trackMenu.addMenu('mm/pixel')
-        self.trackMenuMmPerPixSet = QtGui.QAction('Set',self.mainWin)
+        self.trackMenuMmPerPixSet = QtWidgets.QAction('Set',self.mainWin)
         self.trackMenuMmPerPixSet.triggered.connect(self.setMmPerPix)
-        self.trackMenuMmPerPixMeasure = QtGui.QAction('Measure',self.mainWin,enabled=False)
+        self.trackMenuMmPerPixMeasure = QtWidgets.QAction('Measure',self.mainWin,enabled=False)
         self.trackMenuMmPerPixMeasure.triggered.connect(self.measureMmPerPix)
         self.trackMenuMmPerPix.addActions([self.trackMenuMmPerPixSet,self.trackMenuMmPerPixMeasure])
         
-        self.trackMenuBlurImage = QtGui.QAction('Guassian Blur Image',self.mainWin,checkable=True)
+        self.trackMenuBlurImage = QtWidgets.QAction('Guassian Blur Image',self.mainWin,checkable=True)
         self.trackMenuBlurImage.triggered.connect(self.setBlurImage)
-        self.trackMenuSetBlurSigma = QtGui.QAction('Set Blur Sigma',self.mainWin)
+        self.trackMenuSetBlurSigma = QtWidgets.QAction('Set Blur Sigma',self.mainWin)
         self.trackMenuSetBlurSigma.triggered.connect(self.setBlurSigma)
-        self.trackMenuExpImage = QtGui.QAction('Exponentiate Image',self.mainWin,checkable=True)
+        self.trackMenuExpImage = QtWidgets.QAction('Exponentiate Image',self.mainWin,checkable=True)
         self.trackMenuExpImage.triggered.connect(self.setExponentiateImage)
-        self.trackMenuSetExp = QtGui.QAction('Set Exponent',self.mainWin)
+        self.trackMenuSetExp = QtWidgets.QAction('Set Exponent',self.mainWin)
         self.trackMenuSetExp.triggered.connect(self.setExponent)
         self.trackMenu.addActions([self.trackMenuBlurImage,self.trackMenuSetBlurSigma,self.trackMenuExpImage,self.trackMenuSetExp])
         
         self.trackMenuReflectType = self.trackMenu.addMenu('Reflection Type')
-        self.trackMenuReflectTypeSpot = QtGui.QAction('Spot',self.mainWin,checkable=True)
+        self.trackMenuReflectTypeSpot = QtWidgets.QAction('Spot',self.mainWin,checkable=True)
         self.trackMenuReflectTypeSpot.setChecked(True)
         self.trackMenuReflectTypeSpot.triggered.connect(self.setReflectType)
-        self.trackMenuReflectTypeRing = QtGui.QAction('Ring',self.mainWin,checkable=True)
+        self.trackMenuReflectTypeRing = QtWidgets.QAction('Ring',self.mainWin,checkable=True)
         self.trackMenuReflectTypeRing.triggered.connect(self.setReflectType)
         self.trackMenuReflectType.addActions([self.trackMenuReflectTypeSpot,self.trackMenuReflectTypeRing])
-        self.trackMenuReflectThresh = QtGui.QAction('Reflection Threshold',self.mainWin)
+        self.trackMenuReflectThresh = QtWidgets.QAction('Reflection Threshold',self.mainWin)
         self.trackMenuReflectThresh.triggered.connect(self.setReflectThresh)
         self.trackMenu.addAction(self.trackMenuReflectThresh)
         
         self.trackMenuPupilSign = self.trackMenu.addMenu('Pupil Sign')
-        self.trackMenuPupilSignNeg = QtGui.QAction('Negative',self.mainWin,checkable=True)
+        self.trackMenuPupilSignNeg = QtWidgets.QAction('Negative',self.mainWin,checkable=True)
         self.trackMenuPupilSignNeg.setChecked(True)
         self.trackMenuPupilSignNeg.triggered.connect(self.setPupilSign)
-        self.trackMenuPupilSignPos = QtGui.QAction('Positive',self.mainWin,checkable=True)
+        self.trackMenuPupilSignPos = QtWidgets.QAction('Positive',self.mainWin,checkable=True)
         self.trackMenuPupilSignPos.triggered.connect(self.setPupilSign)
         self.trackMenuPupilSign.addActions([self.trackMenuPupilSignNeg,self.trackMenuPupilSignPos])
         
         self.trackMenuPupilMethod = self.trackMenu.addMenu('Pupil Track Method')
-        self.trackMenuPupilMethodStarburst = QtGui.QAction('Starburst',self.mainWin,checkable=True)
+        self.trackMenuPupilMethodStarburst = QtWidgets.QAction('Starburst',self.mainWin,checkable=True)
         self.trackMenuPupilMethodStarburst.setChecked(True)
         self.trackMenuPupilMethodStarburst.triggered.connect(self.setPupilTrackMethod)
-        self.trackMenuPupilMethodLine = QtGui.QAction('Line',self.mainWin,checkable=True)
+        self.trackMenuPupilMethodLine = QtWidgets.QAction('Line',self.mainWin,checkable=True)
         self.trackMenuPupilMethodLine.triggered.connect(self.setPupilTrackMethod)
-        self.trackMenuPupilMethodGradients = QtGui.QAction('Gradients',self.mainWin,checkable=True)
+        self.trackMenuPupilMethodGradients = QtWidgets.QAction('Gradients',self.mainWin,checkable=True)
         self.trackMenuPupilMethodGradients.triggered.connect(self.setPupilTrackMethod)
-        self.trackMenuPupilMethodIntensity = QtGui.QAction('Intensity',self.mainWin,checkable=True)
+        self.trackMenuPupilMethodIntensity = QtWidgets.QAction('Intensity',self.mainWin,checkable=True)
         self.trackMenuPupilMethodIntensity.triggered.connect(self.setPupilTrackMethod)
         self.trackMenuPupilMethod.addActions([self.trackMenuPupilMethodStarburst,self.trackMenuPupilMethodLine,self.trackMenuPupilMethodGradients,self.trackMenuPupilMethodIntensity])
         
-        self.trackMenuAdaptThresh = QtGui.QAction('Adaptive Threshold',self.mainWin,checkable=True)
+        self.trackMenuAdaptThresh = QtWidgets.QAction('Adaptive Threshold',self.mainWin,checkable=True)
         self.trackMenuAdaptThresh.triggered.connect(self.setAdaptiveThreshold)
-        self.trackMenuCircularity = QtGui.QAction('Circularity',self.mainWin)
+        self.trackMenuCircularity = QtWidgets.QAction('Circularity',self.mainWin)
         self.trackMenuCircularity.triggered.connect(self.setCircularityThresh)
         self.trackMenu.addActions([self.trackMenuAdaptThresh,self.trackMenuCircularity])        
         
         self.trackMenuLineOrigin = self.trackMenu.addMenu('Line Origin')
         self.trackMenuLineOrigin.setEnabled(False)
-        self.trackMenuLineOriginLeft = QtGui.QAction('Left',self.mainWin,checkable=True)
+        self.trackMenuLineOriginLeft = QtWidgets.QAction('Left',self.mainWin,checkable=True)
         self.trackMenuLineOriginLeft.setChecked(True)
         self.trackMenuLineOriginLeft.triggered.connect(self.setPupilEdgeLineOrigin)
-        self.trackMenuLineOriginRight = QtGui.QAction('Right',self.mainWin,checkable=True)
+        self.trackMenuLineOriginRight = QtWidgets.QAction('Right',self.mainWin,checkable=True)
         self.trackMenuLineOriginRight.triggered.connect(self.setPupilEdgeLineOrigin)
         self.trackMenuLineOrigin.addActions([self.trackMenuLineOriginLeft,self.trackMenuLineOriginRight])        
         
-        self.trackMenuGradientDownsamp = QtGui.QAction('Gradient Downsample',self.mainWin,enabled=False)
+        self.trackMenuGradientDownsamp = QtWidgets.QAction('Gradient Downsample',self.mainWin,enabled=False)
         self.trackMenuGradientDownsamp.triggered.connect(self.setPupilGradientDownsample)
         self.trackMenu.addAction(self.trackMenuGradientDownsamp)
         
@@ -248,28 +249,28 @@ class EyeTracker():
         self.analysisMenu = self.menuBar.addMenu('Analysis')
         self.analysisMenu.setEnabled(False)
         self.analysisMenuConvert = self.analysisMenu.addMenu('Convert')
-        self.analysisMenuConvertPixToDeg = QtGui.QAction('Pixels to Degrees',self.mainWin)
+        self.analysisMenuConvertPixToDeg = QtWidgets.QAction('Pixels to Degrees',self.mainWin)
         self.analysisMenuConvertPixToDeg.triggered.connect(self.pixToDeg)
-        self.analysisMenuConvertDegToPix = QtGui.QAction('Degrees to Pixels',self.mainWin)
+        self.analysisMenuConvertDegToPix = QtWidgets.QAction('Degrees to Pixels',self.mainWin)
         self.analysisMenuConvertDegToPix.triggered.connect(self.degToPix)
         self.analysisMenuConvert.addActions([self.analysisMenuConvertPixToDeg,self.analysisMenuConvertDegToPix])
         
-        self.analysisMenuAnalyzeAll = QtGui.QAction('Analyze All Frames',self.mainWin)
+        self.analysisMenuAnalyzeAll = QtWidgets.QAction('Analyze All Frames',self.mainWin)
         self.analysisMenuAnalyzeAll.triggered.connect(self.analyzeAllFrames)
-        self.analysisMenuFrameIntervals = QtGui.QAction('Plot Frame Intervals',self.mainWin)
+        self.analysisMenuFrameIntervals = QtWidgets.QAction('Plot Frame Intervals',self.mainWin)
         self.analysisMenuFrameIntervals.triggered.connect(self.plotFrameIntervals)
         self.analysisMenu.addActions([self.analysisMenuAnalyzeAll,self.analysisMenuFrameIntervals])
         
         self.analysisMenuSaccades = self.analysisMenu.addMenu('Saccades')
-        self.analysisMenuSaccadesFind = QtGui.QAction('Find',self.mainWin)
+        self.analysisMenuSaccadesFind = QtWidgets.QAction('Find',self.mainWin)
         self.analysisMenuSaccadesFind.triggered.connect(self.findSaccades)
-        self.analysisMenuSaccadesDelete = QtGui.QAction('Delete All',self.mainWin)
+        self.analysisMenuSaccadesDelete = QtWidgets.QAction('Delete All',self.mainWin)
         self.analysisMenuSaccadesDelete.triggered.connect(self.deleteAllSaccades)
-        self.analysisMenuSaccadesSmooth = QtGui.QAction('Smoothing',self.mainWin)
+        self.analysisMenuSaccadesSmooth = QtWidgets.QAction('Smoothing',self.mainWin)
         self.analysisMenuSaccadesSmooth.triggered.connect(self.setSaccadeSmooth)
-        self.analysisMenuSaccadesThresh = QtGui.QAction('Threshold',self.mainWin)
+        self.analysisMenuSaccadesThresh = QtWidgets.QAction('Threshold',self.mainWin)
         self.analysisMenuSaccadesThresh.triggered.connect(self.setSaccadeThresh)
-        self.analysisMenuSaccadesRefractory = QtGui.QAction('Refractory Period',self.mainWin)
+        self.analysisMenuSaccadesRefractory = QtWidgets.QAction('Refractory Period',self.mainWin)
         self.analysisMenuSaccadesRefractory.triggered.connect(self.setSaccadeRefractoryPeriod)
         self.analysisMenuSaccades.addActions([self.analysisMenuSaccadesFind,self.analysisMenuSaccadesDelete,self.analysisMenuSaccadesThresh,self.analysisMenuSaccadesSmooth,self.analysisMenuSaccadesRefractory])
         
@@ -291,19 +292,19 @@ class EyeTracker():
         self.imageViewBox.addItem(self.reflectCenterPlot)
         
         # buttons
-        self.startVideoButton = QtGui.QPushButton('Start Video',checkable=True)
+        self.startVideoButton = QtWidgets.QPushButton('Start Video',checkable=True)
         self.startVideoButton.clicked.connect(self.startVideo)
         
-        self.roiButton = QtGui.QPushButton('Set ROI',checkable=True)
+        self.roiButton = QtWidgets.QPushButton('Set ROI',checkable=True)
         self.roiButton.clicked.connect(self.setROI)
         
-        self.findPupilButton = QtGui.QPushButton('Find Pupil',checkable=True)
+        self.findPupilButton = QtWidgets.QPushButton('Find Pupil',checkable=True)
         self.findPupilButton.clicked.connect(self.findPupil)
         
-        self.findReflectButton = QtGui.QPushButton('Find Reflection',checkable=True)
+        self.findReflectButton = QtWidgets.QPushButton('Find Reflection',checkable=True)
         self.findReflectButton.clicked.connect(self.findReflect)
         
-        self.setMaskButton = QtGui.QPushButton('Set Masks',checkable=True)
+        self.setMaskButton = QtWidgets.QPushButton('Set Masks',checkable=True)
         self.setMaskButton.clicked.connect(self.setMask)
         
         self.buttons = (self.startVideoButton,self.roiButton,self.findPupilButton,self.findReflectButton,self.setMaskButton)
@@ -363,12 +364,12 @@ class EyeTracker():
         self.edgeDistLowerThreshLine.sigPositionChangeFinished.connect(self.setEdgeDistThresh)
         
         # save and mask checkboxes
-        self.saveCheckBox = QtGui.QCheckBox('Save Video Data',enabled=False)
-        self.useMaskCheckBox = QtGui.QCheckBox('Use Masks')
+        self.saveCheckBox = QtWidgets.QCheckBox('Save Video Data',enabled=False)
+        self.useMaskCheckBox = QtWidgets.QCheckBox('Use Masks')
         self.useMaskCheckBox.clicked.connect(self.setUseMask)
         
         # frame navigation
-        self.frameNumSpinBox = QtGui.QSpinBox()
+        self.frameNumSpinBox = QtWidgets.QSpinBox()
         self.frameNumSpinBox.setPrefix('Frame: ')
         self.frameNumSpinBox.setSuffix(' of 0')
         self.frameNumSpinBox.setRange(0,1)
@@ -387,16 +388,16 @@ class EyeTracker():
             line.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)    
         
         # data plot duration control
-        self.plotDurLayout = QtGui.QFormLayout()
-        self.plotDurEdit = QtGui.QLineEdit(str(self.defaultDataPlotDur))
+        self.plotDurLayout = QtWidgets.QFormLayout()
+        self.plotDurEdit = QtWidgets.QLineEdit(str(self.defaultDataPlotDur))
         self.plotDurEdit.setAlignment(QtCore.Qt.AlignHCenter)
         self.plotDurEdit.editingFinished.connect(self.changePlotWindowDur)
         self.plotDurLayout.addRow('Plot Duration',self.plotDurEdit)
         
         # layout
-        self.mainWidget = QtGui.QWidget()
+        self.mainWidget = QtWidgets.QWidget()
         self.mainWin.setCentralWidget(self.mainWidget)
-        self.mainLayout = QtGui.QGridLayout()
+        self.mainLayout = QtWidgets.QGridLayout()
         nCols = 20
         nRows = 4
         for col in range(nCols):
@@ -433,10 +434,10 @@ class EyeTracker():
         
     def saveFrameData(self):
         if self.mainWin.sender()==self.fileMenuSaveDataNpz:
-            fileType = 'npz'
+            fileType = '.npz'
         else:
-            fileType = 'mat'
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.'+fileType)
+            fileType = '.mat'
+        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*'+fileType)
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
@@ -456,26 +457,26 @@ class EyeTracker():
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         data = {'frameData': frameData}
-        if fileType=='npz':
+        if fileType=='.npz':
             np.savez_compressed(filePath,**data)
         else:
             scipy.io.savemat(filePath,data,do_compression=True)
         
     def saveTrackingData(self):
         if self.mainWin.sender()==self.fileMenuSaveDataHdf5:
-            fileType = 'hdf5'
+            fileType = '.hdf5'
         elif self.mainWin.sender()==self.fileMenuSaveDataNpz:
-            fileType = 'npz'
+            fileType = '.npz'
         else:
-            fileType = 'mat'
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.'+fileType)
+            fileType = '.mat'
+        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*'+fileType)
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
         self.reflectCenter += self.roiPos
         self.pupilCenter += self.roiPos
         params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
-        if fileType=='hdf5':
+        if fileType=='.hdf5':
             dataFile = h5py.File(filePath,'w',libver='latest')
             dataFile.attrs.create('mmPerPixel',self.mmPerPixel)
             for param in params[1:]:
@@ -483,13 +484,13 @@ class EyeTracker():
             dataFile.close()
         else:
             data = {param: getattr(self,param) for param in params}
-            if fileType=='npz':
+            if fileType=='.npz':
                 np.savez_compressed(filePath,**data)
             else:
                 scipy.io.savemat(filePath,data,do_compression=True)
         
     def saveMovie(self):
-        filePath = QtGui.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
+        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
@@ -512,7 +513,7 @@ class EyeTracker():
             
     def getFrameSaveRange(self):
         startFrame,endFrame = (self.frameNum-self.numDataPlotPts,self.frameNum) if self.frameNum>self.numDataPlotPts else (1,self.numDataPlotPts)
-        text,ok = QtGui.QInputDialog.getText(self.mainWin,'Save Movie','Enter frames range:',text=str(startFrame)+'-'+str(endFrame))
+        text,ok = QtWidgets.QInputDialog.getText(self.mainWin,'Save Movie','Enter frames range:',text=str(startFrame)+'-'+str(endFrame))
         if not ok:
             return None,None
         startFrame,endFrame = [int(n) for n in text.split('-')]
@@ -523,7 +524,7 @@ class EyeTracker():
         return startFrame,endFrame
                
     def loadFrameData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
+        filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
@@ -566,13 +567,12 @@ class EyeTracker():
         self.initDisplay()
         
     def loadTrackingData(self):
-        filePath = QtGui.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
+        filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'Files (*.hdf5 *.npz *.mat)')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        fileType = os.path.splitext(filePath)[1][1:]
         params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
-        if fileType=='hdf5':
+        if fileType=='.hdf5':
             dataFile = h5py.File(filePath,'r')
             if 'mmPerPixel' in dataFile.attrs.keys():
                 self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
@@ -580,7 +580,7 @@ class EyeTracker():
                 setattr(self,param,dataFile[param][:])
             dataFile.close()
         else:
-            data = np.load(filePath) if fileType=='npz' else scipy.io.loadmat(filePath,squeeze_me=True)
+            data = np.load(filePath) if fileType=='.npz' else scipy.io.loadmat(filePath,squeeze_me=True)
             for param in set(data.keys()) & set(params):
                 setattr(self,param,data[param])
         self.dataIsLoaded = True
@@ -651,7 +651,7 @@ class EyeTracker():
                     i += 1
                 else:
                     break
-            selectedCam,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',vimbaCams+webcams,editable=False)
+            selectedCam,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',vimbaCams+webcams,editable=False)
             if ok:
                 if selectedCam in vimbaCams:
                     self.camType = 'vimba'
@@ -664,15 +664,15 @@ class EyeTracker():
                 self.cameraMenuUseCam.setChecked(False)
             else:
                 try:
-                    import nidaq
-                    deviceNames = nidaq.System().getDevNames()
-                    selectedDevice,ok = QtGui.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
+                    import nidaqmx
+                    deviceNames = nidaqmx.system._collections.device_collection.DeviceCollection().devicenames
+                    selectedDevice,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
                     if ok:
                         self.nidaq = selectedDevice
-                        self.nidaqDigInputs = nidaq.DigitalInput(device=selectedDevice,port=0)
-                        self.nidaqDigOutputs = nidaq.DigitalOutput(device=selectedDevice,port=1,initial_state='low')
-                        self.nidaqInCh = 0
-                        self.nidaqOutCh = 0
+                        self.nidaqDigitalIn = nidaqmx.Task()
+                        self.nidaqDigitalIn.di_channels.add_di_chan(self.nidaqDeviceName+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+                        self.nidaqDigitalOut = nidaqmx.Task()
+                        self.nidaqDigitalOut.do_channels.add_do_chan(self.nidaqDeviceName+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
                         self.cameraMenuNidaq.setEnabled(True)
                         self.cameraMenuNidaqOut.setChecked(True)
                 except:
@@ -705,8 +705,8 @@ class EyeTracker():
             self.cam.release()
         self.cam = None
         if self.nidaq is not None:
-            self.nidaqDigInputs.clear()
-            self.nidaqDigOutputs.clear()
+            self.nidaqDigitalIn.close()
+            self.nidaqDigitalOut.close()
             self.nidaq = None
         self.cameraMenuShowAllFrames.setChecked(False)
         self.cameraMenuSettings.setEnabled(False)
@@ -717,9 +717,9 @@ class EyeTracker():
     def startCamera(self,bufferSize=1):
         self.cameraMenuSettings.setEnabled(False)
         if self.nidaq is not None:
-            self.nidaqDigInputs.start()
-            self.nidaqDigOutputs.start()
-            self.nidaqDigOutputs.write(np.zeros(self.nidaqDigOutputs.no_lines,dtype=np.uint8))
+            self.nidaqDigitalIn.start()
+            self.nidaqDigitalOut.start()
+            self.nidaqDigitalOut.write(False)
         if self.camType=='vimba':
             for _ in range(bufferSize):
                 frame = self.cam.getFrame()
@@ -736,8 +736,8 @@ class EyeTracker():
         if self.dataFileOut is not None:
             self.closeDataFileOut()
         if self.nidaq is not None:
-            self.nidaqDigInputs.stop()
-            self.nidaqDigOutputs.stop()
+            self.nidaqDigitalIn.stop()
+            self.nidaqDigitalOut.stop()
         self.cameraMenuSettings.setEnabled(True)
         
     def getCamImage(self):
@@ -782,13 +782,13 @@ class EyeTracker():
             self.cam.set(cv2.CAP_PROP_EXPOSURE,math.log(self.camExposure/1000,2))
         
     def setCamBufferSize(self):
-        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
+        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
         if not ok:
             return
         self.camBufferSize = val
             
     def setCamBinning(self):
-        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.camBinning,min=1,max=8)
+        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.camBinning,min=1,max=8)
         if not ok:
             return
         scaleFactor = self.camBinning/val
@@ -827,7 +827,7 @@ class EyeTracker():
             units = 'Exposure time (ms):'
             minVal = 0.001
             maxVal = 10000
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Camera Exposure',units,value=self.camExposure,min=minVal,max=maxVal,decimals=3)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set Camera Exposure',units,value=self.camExposure,min=minVal,max=maxVal,decimals=3)
         if not ok:
             return
         self.camExposure = val
@@ -837,7 +837,7 @@ class EyeTracker():
             self.cam.set(cv2.CAP_PROP_EXPOSURE,math.log(val/1000,2))
     
     def setCamFrameRate(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Camera Frame Rate','Frames/s:',value=self.frameRate,min=0.01,max=119.30,decimals=2)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set Camera Frame Rate','Frames/s:',value=self.frameRate,min=0.01,max=119.30,decimals=2)
         if not ok:
             return
         self.frameRate = val
@@ -846,12 +846,12 @@ class EyeTracker():
         self.changePlotWindowDur()
     
     def setCamSavePath(self):
-        dirPath = QtGui.QFileDialog.getExistingDirectory(self.mainWin,'Choose Directory',self.camSavePath)
+        dirPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Choose Directory',self.camSavePath)
         if dirPath!='':
             self.camSavePath = dirPath
         
     def setCamSaveBaseName(self):
-        val,ok = QtGui.QInputDialog.getText(self.mainWin,'Set File Base Name','',text=self.camSaveBaseName)
+        val,ok = QtWidgets.QInputDialog.getText(self.mainWin,'Set File Base Name','',text=self.camSaveBaseName)
         if ok:
             self.camSaveBaseName = val
         
@@ -882,7 +882,7 @@ class EyeTracker():
         self.updateDisplay()
         
     def setBlurSigma(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Blur Sigma','',value=self.blurSigma,min=0.01,decimals=2)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set Blur Sigma','',value=self.blurSigma,min=0.01,decimals=2)
         if not ok:
             return
         self.blurSigma = val
@@ -904,7 +904,7 @@ class EyeTracker():
         self.updateDisplay()
         
     def setExponent(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Exponent','',value=self.imgExponent,min=0.01,decimals=2)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set Exponent','',value=self.imgExponent,min=0.01,decimals=2)
         if not ok:
             return
         self.imgExponent = val
@@ -1058,7 +1058,7 @@ class EyeTracker():
         self.image = img
         showAll = False
         showNone = False
-        if self.saveCheckBox.isChecked() or (self.cameraMenuNidaqIn.isChecked() and self.nidaqDigInputs.read()[self.nidaqInCh]):
+        if self.saveCheckBox.isChecked() or (self.cameraMenuNidaqIn.isChecked() and self.nidaqDigitalIn.read()):
             if self.dataFileOut is None:
                 self.frameNum = 0
                 if self.cameraMenuNidaqIn.isChecked():
@@ -1072,7 +1072,7 @@ class EyeTracker():
                 showNone = True
             else:
                 if self.nidaq is not None:
-                    self.nidaqDigOutputs.writeBit(self.nidaqOutCh,1)
+                    self.nidaqDigitalOut.write(True)
                 if self.camType=='vimba':
                     timestamp /= self.cam.GevTimestampTickFrequency
                 self.frameDataset.resize(self.frameNum,axis=0)
@@ -1080,7 +1080,7 @@ class EyeTracker():
                 self.frameTimeDataset.resize(self.frameNum,axis=0)
                 self.frameTimeDataset[-1] = timestamp
                 if self.nidaq is not None:
-                    self.nidaqDigOutputs.writeBit(self.nidaqOutCh,0)
+                    self.nidaqDigitalOut.write(False)
                 showAll = self.cameraMenuShowAllFrames.isChecked()
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
@@ -1124,7 +1124,7 @@ class EyeTracker():
             
     def mainWinKeyPressEvent(self,event):
         key = event.key()
-        modifiers = QtGui.QApplication.keyboardModifiers()
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
         if key in (QtCore.Qt.Key_Comma,QtCore.Qt.Key_Period):
             if self.cam is None and not any([button.isChecked() for button in self.buttons]):
                 frameShift = int(0.9*self.numDataPlotPts) if int(modifiers & QtCore.Qt.ControlModifier)>0 else 1
@@ -1664,7 +1664,7 @@ class EyeTracker():
         self.meanImageIntensity = self.image.mean()
         
     def setCircularityThresh(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set pupil circularity threshold','ellipse axis length ratio:',value=self.pupilCircularityThresh,min=0.01,max=0.99,decimals=2)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set pupil circularity threshold','ellipse axis length ratio:',value=self.pupilCircularityThresh,min=0.01,max=0.99,decimals=2)
         if ok:
             self.pupilCircularityThresh = val
         
@@ -1677,7 +1677,7 @@ class EyeTracker():
             self.trackMenuLineOriginRight.setChecked(True)
         
     def setPupilGradientDownsample(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set pupil gradient downsample','fraction of pixels:',value=self.pupilGradientDownsample,min=0.1,max=1,decimals=2)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set pupil gradient downsample','fraction of pixels:',value=self.pupilGradientDownsample,min=0.1,max=1,decimals=2)
         if ok:
             self.pupilGradientDownsample = val
         
@@ -1936,7 +1936,7 @@ class EyeTracker():
             self.reflectCenterPlot.setData(x=[],y=[])
             
     def setReflectThresh(self):
-        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Reflection Threshold','Pixel intensity:',value=self.reflectThresh,min=0,max=254)
+        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Reflection Threshold','Pixel intensity:',value=self.reflectThresh,min=0,max=254)
         if ok:
             self.reflectThresh = val
         
@@ -2017,18 +2017,18 @@ class EyeTracker():
         
     def setMmPerPix(self):
         val = 0 if np.isnan(self.mmPerPixel) else self.mmPerPixel
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set mm/pixel','mm/pixel:',value=val,min=0,decimals=4)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set mm/pixel','mm/pixel:',value=val,min=0,decimals=4)
         if ok:
             self.mmPerPixel = val if val>0 else np.nan
     
     def measureMmPerPix(self):
         if self.reflectCenterSeed is None:
-            QtGui.QMessageBox.about(self.mainWin,'Set mm/pixel','First find reflection')
+            QtWidgets.QMessageBox.about(self.mainWin,'Set mm/pixel','First find reflection')
         else:
             p = int(0.5*self.frameRate)
             avgPts = p if self.numDataPlotPts>=p else self.numDataPlotPts
             initialReflectCenter = self.getAvgReflectCenter(avgPts)
-            QtGui.QMessageBox.about(self.mainWin,'Set mm/pixel','Move camera 0.5 mm; then press ok')
+            QtWidgets.QMessageBox.about(self.mainWin,'Set mm/pixel','Move camera 0.5 mm; then press ok')
             finalReflectCenter = self.getAvgReflectCenter(avgPts)
             self.mmPerPixel = 0.5/np.sqrt(np.sum((finalReflectCenter-initialReflectCenter)**2))
             
@@ -2119,17 +2119,17 @@ class EyeTracker():
         self.selectedSaccade = None
     
     def setSaccadeSmooth(self):
-        val,ok = QtGui.QInputDialog.getInt(self.mainWin,'Set Saccade Smoothing','number of points:',value=self.saccadeSmoothPts,min=1)
+        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Saccade Smoothing','number of points:',value=self.saccadeSmoothPts,min=1)
         if ok:
             self.saccadeSmoothPts = val
         
     def setSaccadeThresh(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Saccade Threshold','standard devations from baseline:',value=self.saccadeThresh,min=0.1,decimals=1)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set Saccade Threshold','standard devations from baseline:',value=self.saccadeThresh,min=0.1,decimals=1)
         if ok:
             self.saccadeThresh = val
             
     def setSaccadeRefractoryPeriod(self):
-        val,ok = QtGui.QInputDialog.getDouble(self.mainWin,'Set Saccade Refractory Period','seconds:',value=self.saccadeRefractoryPeriod,min=0.001,decimals=3)
+        val,ok = QtWidgets.QInputDialog.getDouble(self.mainWin,'Set Saccade Refractory Period','seconds:',value=self.saccadeRefractoryPeriod,min=0.001,decimals=3)
         if ok:
             self.saccadeRefractoryPeriod = val
         
