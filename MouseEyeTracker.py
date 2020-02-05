@@ -490,14 +490,14 @@ class EyeTracker():
                 scipy.io.savemat(filePath,data,do_compression=True)
         
     def saveMovie(self):
-        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.avi')
+        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.mp4')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
         startFrame,endFrame = self.getFrameSaveRange()
         if startFrame is None:
             return
-        vidOut = cv2.VideoWriter(filePath,-1,self.frameRate,self.roiSize)
+        vidOut = cv2.VideoWriter(filePath,cv2.VideoWriter_fourcc('M','P','G','4'),self.frameRate,self.roiSize)
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for frame in range(startFrame,endFrame+1):
