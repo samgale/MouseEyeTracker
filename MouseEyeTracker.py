@@ -497,7 +497,7 @@ class EyeTracker():
         startFrame,endFrame = self.getFrameSaveRange()
         if startFrame is None:
             return
-        vidOut = cv2.VideoWriter(filePath,cv2.VideoWriter_fourcc('M','P','G','4'),self.frameRate,self.roiSize)
+        vidOut = cv2.VideoWriter(filePath,cv2.VideoWriter_fourcc(*'MPG4'),self.frameRate,self.roiSize)
         if self.dataFileIn is None:
             self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for frame in range(startFrame,endFrame+1):
