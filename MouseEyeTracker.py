@@ -505,7 +505,7 @@ class EyeTracker():
                 isImage,image = self.video.read()
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
-                image = self.dataFileIn['frame'][frame-1]
+                image = self.dataFileIn['frames'][frame-1]
             vidOut.write(image[self.roiInd])
         vidOut.release()
         if self.dataFileIn is None:
