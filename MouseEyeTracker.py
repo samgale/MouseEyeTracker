@@ -132,11 +132,13 @@ class EyeTracker():
         self.fileMenuSaveDataMat = QtWidgets.QAction('mat',self.mainWin)
         self.fileMenuSaveDataMat.triggered.connect(self.saveTrackingData)
         self.fileMenuSaveData.addActions([self.fileMenuSaveDataHdf5,self.fileMenuSaveDataNpz,self.fileMenuSaveDataMat])
+        self.fileMenuSaveImage = QtWidgets.QAction('Image',self.mainWin)
+        self.fileMenuSaveMovie.triggered.connect(self.saveImage)
         self.fileMenuSaveMovie = QtWidgets.QAction('Movie',self.mainWin)
         self.fileMenuSaveMovie.triggered.connect(self.saveMovie)
         self.fileMenuSaveAnnotatedMovie = QtWidgets.QAction('Annotated Movie',self.mainWin,enabled=False)
         self.fileMenuSaveAnnotatedMovie.triggered.connect(self.saveMovie)
-        self.fileMenuSave.addActions([self.fileMenuSaveMovie,self.fileMenuSaveAnnotatedMovie])
+        self.fileMenuSave.addActions([self.fileMenuSaveImage,self.fileMenuSaveMovie,self.fileMenuSaveAnnotatedMovie])
         
         # camera menu
         self.cameraMenu = self.menuBar.addMenu('Camera')         
@@ -493,16 +495,29 @@ class EyeTracker():
                 np.savez_compressed(filePath,**data)
             else:
                 scipy.io.savemat(filePath,data,do_compression=True)
+                
+    def saveImage(self):
+        if self.image is None:
+            return
+        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.png')
+        if filePath=='':
+            return
+        self.fileOpenSavePath = os.path.dirname(filePath)
+        cv2.imwrite(filePath,self.image)
         
     def saveMovie(self):
         filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.mp4')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
+        if self.ffmpeg is None:
+            self.getFFmpeg()
+            if self.ffmpeg is None:
+                return
         startFrame,endFrame = self.getFrameSaveRange()
         if startFrame is None:
             return
-        vidOut = cv2.VideoWriter(filePath,cv2.VideoWriter_fourcc(*'MPG4'),self.frameRate,self.roiSize)
+        vidOut = skvideo.io.FFmpegWriter(filePath,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
         if self.dataFileIn is None:
             self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for frame in range(startFrame,endFrame+1):
@@ -511,8 +526,8 @@ class EyeTracker():
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
                 image = self.dataFileIn['frames'][frame-1]
-            vidOut.write(image[self.roiInd])
-        vidOut.release()
+            vidOut.writeFrame(image[self.roiInd])
+        vidOut.close()
         if self.dataFileIn is None:
             self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
             
@@ -527,6 +542,17 @@ class EyeTracker():
         if endFrame>self.numFrames:
             endFrame = self.numFrames
         return startFrame,endFrame
+    
+    def getFFmpeg(self):
+        try:
+            ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
+            if ffmpegPath!='':
+                import skvideo
+                skvideo.setFFmpegPath(ffmpegPath)
+                import skvideo.io
+                self.ffmpeg = ffmpegPath
+        except:
+            print('Unable to initialize skvideo and ffmpeg')
                
     def loadFrameData(self):
         filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
@@ -862,20 +888,13 @@ class EyeTracker():
             self.camSaveBaseName = val
             
     def setCamSaveFileType(self):
-        fileType,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Save File Type','File Type:',('hdf5','mp4'),editable=False)
+        fileType,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Save File Type','File Type:',('.hdf5','.mp4'),editable=False)
         if not ok:
             return
-        if fileType=='mp4' and self.ffmpeg is None:
-            try:
-                ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Navigate to directory containing ffmpeg.exe','')
-                if ffmpegPath!='':
-                    import skvideo
-                    skvideo.setFFmpegPath(ffmpegPath)
-                    import skvideo.io
-                    self.ffmpeg = ffmpegPath
-                    self.camSaveFileType = fileType
-            except:
-                print('Unable to initialize skvideo and ffmpeg')
+        if fileType=='.mp4' and self.ffmpeg is None:
+            self.getFFmpeg()
+            if self.ffmpeg is not None:
+                self.camSaveFileType = fileType
         else:
             self.camSaveFileType = fileType
         
@@ -1035,7 +1054,7 @@ class EyeTracker():
                     while self.startVideoButton.isChecked():
                         isImage,image = self.cam.read()
                         image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-                        self.processCamFrame(image,time.clock())
+                        self.processCamFrame(image,time.process_time())
                         self.app.processEvents()
         else:
             if self.cam is not None:
@@ -1087,22 +1106,29 @@ class EyeTracker():
                 self.frameNum = 0
                 if self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setChecked(True)
-                self.dataFileOut = h5py.File(os.path.join(self.camSavePath,self.camSaveBaseName+'_'+time.strftime('%Y%m%d_%H%M%S.hdf5')),'w',libver='latest')
+                fileName = os.path.join(self.camSavePath,self.camSaveBaseName+'_'+time.strftime('%Y%m%d_%H%M%S'))
+                self.dataFileOut = h5py.File(fileName+'.hdf5','w',libver='latest')
                 self.dataFileOut.attrs.create('frameRate',self.frameRate)
                 self.dataFileOut.attrs.create('mmPerPixel',self.mmPerPixel)
-                imgShape = tuple(self.roiSize[::-1])
-                self.frameDataset = self.dataFileOut.create_dataset('frames',(0,)+imgShape,maxshape=(None,)+imgShape,dtype=img.dtype,chunks=(1,)+imgShape,compression='gzip',compression_opts=1)
                 self.frameTimeDataset = self.dataFileOut.create_dataset('frameTimes',(0,),maxshape=(None,),dtype=float)
+                if self.camSaveFileType=='.hdf5':
+                    imgShape = tuple(self.roiSize[::-1])
+                    self.frameDataset = self.dataFileOut.create_dataset('frames',(0,)+imgShape,maxshape=(None,)+imgShape,dtype=img.dtype,chunks=(1,)+imgShape,compression='gzip',compression_opts=1)
+                else:
+                    self.videoOut = skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
                 showNone = True
             else:
                 if self.nidaq is not None:
                     self.nidaqDigitalOut.write(True)
                 if self.camType=='vimba':
                     timestamp /= self.cam.GevTimestampTickFrequency
-                self.frameDataset.resize(self.frameNum,axis=0)
-                self.frameDataset[-1] = img[self.roiInd]
                 self.frameTimeDataset.resize(self.frameNum,axis=0)
                 self.frameTimeDataset[-1] = timestamp
+                if self.camSaveFileType=='.hdf5':
+                    self.frameDataset.resize(self.frameNum,axis=0)
+                    self.frameDataset[-1] = img[self.roiInd]
+                else:
+                    self.videoOut.writeFrame(img[self.roiInd])
                 if self.nidaq is not None:
                     self.nidaqDigitalOut.write(False)
                 showAll = self.cameraMenuShowAllFrames.isChecked()
@@ -1114,6 +1140,9 @@ class EyeTracker():
     def closeDataFileOut(self):
         self.dataFileOut.close()
         self.dataFileOut = None
+        if self.videoOut is not None:
+            self.videoOut.close()
+            self.videoOut = None
         self.frameNum = 0
         if self.cameraMenuNidaqIn.isChecked():
             self.saveCheckBox.setChecked(False)
