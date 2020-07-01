@@ -54,11 +54,14 @@ class EyeTracker():
         self.fileOpenSavePath = os.path.dirname(os.path.realpath(__file__))
         self.camSavePath = self.fileOpenSavePath
         self.camSaveBaseName = 'MouseEyeTracker'
+        self.camSaveFileType = 'hdf5'
+        self.ffmpeg = None
         self.nidaq = None
         self.vimba = None
         self.cam = None
         self.camFrames = []
-        self.video = None
+        self.videoIn = None
+        self.videoOut = None
         self.dataFileIn = None
         self.dataFileOut = None
         self.image = None
@@ -167,7 +170,9 @@ class EyeTracker():
         self.cameraMenuSavePath.triggered.connect(self.setCamSavePath)
         self.cameraMenuSaveBaseName = QtWidgets.QAction('Save Basename',self.mainWin)
         self.cameraMenuSaveBaseName.triggered.connect(self.setCamSaveBaseName)
-        self.cameraMenu.addActions([self.cameraMenuSavePath,self.cameraMenuSaveBaseName])
+        self.cameraMenuSaveFileType = QtWidgets.QAction('Save File Type',self.mainWin)
+        self.cameraMenuSaveFileType.triggered.connect(self.setCamSaveFileType)
+        self.cameraMenu.addActions([self.cameraMenuSavePath,self.cameraMenuSaveBaseName,self.cameraMenuSaveFileType])
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
@@ -426,7 +431,7 @@ class EyeTracker():
     def mainWinCloseEvent(self,event):
         if self.cam is not None:
             self.closeCamera()
-        elif self.video is not None:
+        elif self.videoIn is not None:
             self.closeVideo()
         elif self.dataFileIn is not None:
             self.closeDataFileIn()
@@ -446,16 +451,16 @@ class EyeTracker():
             return
         frameData = np.zeros((endFrame-startFrame+1,self.roiSize[1],self.roiSize[0]),dtype=self.image.dtype)
         if self.dataFileIn is None:
-            self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
+            self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for i,frame in enumerate(range(startFrame,endFrame+1)):
             if self.dataFileIn is None:
-                isImage,image = self.video.read()
+                isImage,image = self.videoIn.read()
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
                 image = self.dataFileIn['frame'][frame-1]
             frameData[i] = image[self.roiInd]
         if self.dataFileIn is None:
-            self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
+            self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         data = {'frameData': frameData}
         if fileType=='.npz':
             np.savez_compressed(filePath,**data)
@@ -499,17 +504,17 @@ class EyeTracker():
             return
         vidOut = cv2.VideoWriter(filePath,cv2.VideoWriter_fourcc(*'MPG4'),self.frameRate,self.roiSize)
         if self.dataFileIn is None:
-            self.video.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
+            self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for frame in range(startFrame,endFrame+1):
             if self.dataFileIn is None:
-                isImage,image = self.video.read()
+                isImage,image = self.videoIn.read()
                 image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
             else:
                 image = self.dataFileIn['frames'][frame-1]
             vidOut.write(image[self.roiInd])
         vidOut.release()
         if self.dataFileIn is None:
-            self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
+            self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
             
     def getFrameSaveRange(self):
         startFrame,endFrame = (self.frameNum-self.numDataPlotPts,self.frameNum) if self.frameNum>self.numDataPlotPts else (1,self.numDataPlotPts)
@@ -533,7 +538,7 @@ class EyeTracker():
             self.closeCamera()
         elif self.dataFileIn is not None:
             self.closeDataFileIn()
-        elif self.video is not None:
+        elif self.videoIn is not None:
             self.closeVideo()
         self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+filePath)
         if os.path.splitext(os.path.basename(filePath))[1]=='.hdf5':
@@ -546,10 +551,10 @@ class EyeTracker():
             if np.isnan(self.frameRate):
                 self.frameRate = self.numFrames/self.frameTimes[-1]
         else:
-            self.video = cv2.VideoCapture(filePath)
-            self.frameRate = self.video.get(cv2.CAP_PROP_FPS)
+            self.videoIn = cv2.VideoCapture(filePath)
+            self.frameRate = self.videoIn.get(cv2.CAP_PROP_FPS)
             self.mmPerPixel = np.nan
-            self.numFrames = int(round(self.video.get(cv2.CAP_PROP_FRAME_COUNT)))
+            self.numFrames = int(round(self.videoIn.get(cv2.CAP_PROP_FRAME_COUNT)))
             self.frameTimes = np.nan
         self.frameNumSpinBox.setRange(1,self.numFrames)
         self.frameNumSpinBox.setValue(1)
@@ -601,8 +606,8 @@ class EyeTracker():
         
     def closeVideo(self):
         self.closeFileCleanup()
-        self.video.release()
-        self.video = None        
+        self.videoIn.release()
+        self.videoIn = None        
         
     def closeFileCleanup(self):
         self.turnOffButtons()
@@ -626,7 +631,7 @@ class EyeTracker():
         if self.cameraMenuUseCam.isChecked():
             if self.dataFileIn is not None:
                 self.closeDataFileIn()
-            elif self.video is not None:
+            elif self.videoIn is not None:
                 self.closeVideo()
             try:
                 if self.vimba is None:
@@ -855,6 +860,24 @@ class EyeTracker():
         val,ok = QtWidgets.QInputDialog.getText(self.mainWin,'Set File Base Name','',text=self.camSaveBaseName)
         if ok:
             self.camSaveBaseName = val
+            
+    def setCamSaveFileType(self):
+        fileType,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Save File Type','File Type:',('hdf5','mp4'),editable=False)
+        if not ok:
+            return
+        if fileType=='mp4' and self.ffmpeg is None:
+            try:
+                ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Navigate to directory containing ffmpeg.exe','')
+                if ffmpegPath!='':
+                    import skvideo
+                    skvideo.setFFmpegPath(ffmpegPath)
+                    import skvideo.io
+                    self.ffmpeg = ffmpegPath
+                    self.camSaveFileType = fileType
+            except:
+                print('Unable to initialize skvideo and ffmpeg')
+        else:
+            self.camSaveFileType = fileType
         
     def setNidaqIO(self):
         if self.mainWin.sender() is self.cameraMenuNidaqIn:
@@ -868,7 +891,7 @@ class EyeTracker():
         if self.dataFileIn is not None:
             self.image = self.dataFileIn['frames'][self.frameNum-1]
         else:
-            isImage,image = self.video.read()
+            isImage,image = self.videoIn.read()
             self.image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
         if self.trackMenuBlurImage.isChecked():
             self.blurImage()
@@ -989,8 +1012,8 @@ class EyeTracker():
                 if self.frameNum==self.numFrames:
                     self.frameNum = 0
                     self.setDataPlotXRange()
-                    if self.video is not None:
-                        self.video.set(cv2.CAP_PROP_POS_FRAMES,0)
+                    if self.videoIn is not None:
+                        self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,0)
                 while self.startVideoButton.isChecked():
                     if self.frameNum==self.numFrames:
                         self.startVideoButton.click()
@@ -1968,8 +1991,8 @@ class EyeTracker():
                 
     def goToFrame(self):
         self.frameNum = self.frameNumSpinBox.value()
-        if self.video is not None:
-            self.video.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
+        if self.videoIn is not None:
+            self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,self.frameNum-1)
         self.getVideoImage()
         self.updateDisplay(showAll=True)
     
