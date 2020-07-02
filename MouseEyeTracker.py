@@ -54,8 +54,8 @@ class EyeTracker():
         self.fileOpenSavePath = os.path.dirname(os.path.realpath(__file__))
         self.camSavePath = self.fileOpenSavePath
         self.camSaveBaseName = 'MouseEyeTracker'
-        self.camSaveFileType = 'hdf5'
-        self.ffmpeg = None
+        self.camSaveFileType = '.hdf5'
+        self.skvideo = None
         self.nidaq = None
         self.vimba = None
         self.cam = None
@@ -133,7 +133,7 @@ class EyeTracker():
         self.fileMenuSaveDataMat.triggered.connect(self.saveTrackingData)
         self.fileMenuSaveData.addActions([self.fileMenuSaveDataHdf5,self.fileMenuSaveDataNpz,self.fileMenuSaveDataMat])
         self.fileMenuSaveImage = QtWidgets.QAction('Image',self.mainWin)
-        self.fileMenuSaveMovie.triggered.connect(self.saveImage)
+        self.fileMenuSaveImage.triggered.connect(self.saveImage)
         self.fileMenuSaveMovie = QtWidgets.QAction('Movie',self.mainWin)
         self.fileMenuSaveMovie.triggered.connect(self.saveMovie)
         self.fileMenuSaveAnnotatedMovie = QtWidgets.QAction('Annotated Movie',self.mainWin,enabled=False)
@@ -510,14 +510,14 @@ class EyeTracker():
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        if self.ffmpeg is None:
-            self.getFFmpeg()
-            if self.ffmpeg is None:
+        if self.skvideo is None:
+            self.importSkvideo()
+            if self.skvideo is None:
                 return
         startFrame,endFrame = self.getFrameSaveRange()
         if startFrame is None:
             return
-        vidOut = skvideo.io.FFmpegWriter(filePath,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
+        vidOut = self.skvideo.io.FFmpegWriter(filePath,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
         if self.dataFileIn is None:
             self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,startFrame-1)
         for frame in range(startFrame,endFrame+1):
@@ -543,19 +543,19 @@ class EyeTracker():
             endFrame = self.numFrames
         return startFrame,endFrame
     
-    def getFFmpeg(self):
+    def importSkvideo(self):
         try:
             ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
             if ffmpegPath!='':
                 import skvideo
-                skvideo.setFFmpegPath(ffmpegPath)
+                skvideo.setFFmpegPath(ffmpegPath) # execute this before importing skvideo.io
                 import skvideo.io
-                self.ffmpeg = ffmpegPath
+                self.skvideo = skvideo
         except:
-            print('Unable to initialize skvideo and ffmpeg')
+            print('Unable to initialize skvideo')
                
     def loadFrameData(self):
-        filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.avi *.mov *.hdf5')
+        filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
@@ -567,21 +567,29 @@ class EyeTracker():
         elif self.videoIn is not None:
             self.closeVideo()
         self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+filePath)
-        if os.path.splitext(os.path.basename(filePath))[1]=='.hdf5':
+        fileName,fileExt = os.path.splitext(os.path.basename(filePath))
+        if fileExt=='.hdf5':
             self.dataFileIn = h5py.File(filePath,'r')
             self.frameRate = self.dataFileIn.attrs.get('frameRate')
             self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
-            self.numFrames = self.dataFileIn['frames'].shape[0]
             self.frameTimes = self.dataFileIn['frameTimes'][:]
-            self.frameTimes -= self.frameTimes[0]
+            self.numFrames = self.dataFileIn['frames'].shape[0]
             if np.isnan(self.frameRate):
                 self.frameRate = self.numFrames/self.frameTimes[-1]
         else:
             self.videoIn = cv2.VideoCapture(filePath)
             self.frameRate = self.videoIn.get(cv2.CAP_PROP_FPS)
-            self.mmPerPixel = np.nan
             self.numFrames = int(round(self.videoIn.get(cv2.CAP_PROP_FRAME_COUNT)))
-            self.frameTimes = np.nan
+            dataFilePath = os.path.join(os.path.dirname(filePath),fileName+'.hdf5')
+            if os.path.isfile(dataFilePath):
+                dataFile = h5py.File(dataFilePath,'r')
+                self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
+                self.frameTimes = dataFile['frameTimes'][:]
+            else:
+                self.mmPerPixel = np.nan
+                self.frameTimes = np.nan
+        if not np.all(np.isnan(self.frameTimes)):
+            self.frameTimes -= self.frameTimes[0]
         self.frameNumSpinBox.setRange(1,self.numFrames)
         self.frameNumSpinBox.setValue(1)
         self.frameNumSpinBox.setSuffix(' of '+str(self.numFrames))
@@ -709,6 +717,7 @@ class EyeTracker():
                 except:
                     self.nidaq = None
                     print('Unable to initialize nidaq')
+                self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+selectedCam+'     '+'nidaq: '+self.nidaq)
                 self.setCamProps()
                 self.frameNum = 0
                 self.initDisplay()
@@ -744,6 +753,7 @@ class EyeTracker():
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
         self.resetPupilTracking()
+        self.mainWin.setWindowTitle('MouseEyeTracker')
         
     def startCamera(self,bufferSize=1):
         self.cameraMenuSettings.setEnabled(False)
@@ -891,9 +901,9 @@ class EyeTracker():
         fileType,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Save File Type','File Type:',('.hdf5','.mp4'),editable=False)
         if not ok:
             return
-        if fileType=='.mp4' and self.ffmpeg is None:
-            self.getFFmpeg()
-            if self.ffmpeg is not None:
+        if fileType=='.mp4' and self.skvideo is None:
+            self.importSkvideo()
+            if self.skvideo is not None:
                 self.camSaveFileType = fileType
         else:
             self.camSaveFileType = fileType
@@ -1115,7 +1125,7 @@ class EyeTracker():
                     imgShape = tuple(self.roiSize[::-1])
                     self.frameDataset = self.dataFileOut.create_dataset('frames',(0,)+imgShape,maxshape=(None,)+imgShape,dtype=img.dtype,chunks=(1,)+imgShape,compression='gzip',compression_opts=1)
                 else:
-                    self.videoOut = skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
+                    self.videoOut = self.skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
                 showNone = True
             else:
                 if self.nidaq is not None:
