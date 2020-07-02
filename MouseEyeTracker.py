@@ -9,7 +9,7 @@ Acquire data with camera or analyze data from hdf5 or video file
 from __future__ import division
 import sip
 sip.setapi('QString', 2)
-import h5py, math, os, time
+import h5py, json, math, os, time
 import cv2
 import numpy as np
 import scipy.io
@@ -56,6 +56,7 @@ class EyeTracker():
         self.camSaveBaseName = 'MouseEyeTracker'
         self.camSaveFileType = '.hdf5'
         self.skvideo = None
+        self.ffmpeg = None
         self.nidaq = None
         self.vimba = None
         self.cam = None
@@ -167,16 +168,20 @@ class EyeTracker():
         self.cameraMenuNidaqOut.triggered.connect(self.setNidaqIO)
         self.cameraMenuNidaq.addActions([self.cameraMenuNidaqIn,self.cameraMenuNidaqOut])
         
-        self.cameraMenuSavePath = QtWidgets.QAction('Set Save Path',self.mainWin)
-        self.cameraMenuSavePath.triggered.connect(self.setCamSavePath)
-        self.cameraMenuSaveBaseName = QtWidgets.QAction('Set Save Basename',self.mainWin)
-        self.cameraMenuSaveBaseName.triggered.connect(self.setCamSaveBaseName)
-        self.cameraMenuSaveFileType = QtWidgets.QAction('Set Save File Type',self.mainWin)
-        self.cameraMenuSaveFileType.triggered.connect(self.setCamSaveFileType)
-        self.cameraMenuConfig = QtWidgets.QAction('Save Configuration',self.mainWin)
-        self.cameraMenuConfig.triggered.connect(self.saveCamConfig)
-        self.cameraMenuConfig.setEnabled(False)
-        self.cameraMenu.addActions([self.cameraMenuSavePath,self.cameraMenuSaveBaseName,self.cameraMenuSaveFileType,self.cameraMenuConfig])
+        self.cameraMenuSetSavePath = QtWidgets.QAction('Set Save Path',self.mainWin)
+        self.cameraMenuSetSavePath.triggered.connect(self.setCamSavePath)
+        self.cameraMenuSetSaveBaseName = QtWidgets.QAction('Set Save Basename',self.mainWin)
+        self.cameraMenuSetSaveBaseName.triggered.connect(self.setCamSaveBaseName)
+        self.cameraMenuSetSaveFileType = QtWidgets.QAction('Set Save File Type',self.mainWin)
+        self.cameraMenuSetSaveFileType.triggered.connect(self.setCamSaveFileType)
+        self.cameraMenu.addActions([self.cameraMenuSetSavePath,self.cameraMenuSetSaveBaseName,self.cameraMenuSetSaveFileType])
+        
+        self.cameraMenuLoadConfig = QtWidgets.QAction('Load Configuration',self.mainWin)
+        self.cameraMenuLoadConfig.triggered.connect(self.loadCamConfig)
+        self.cameraMenuSaveConfig = QtWidgets.QAction('Save Configuration',self.mainWin)
+        self.cameraMenuSaveConfig.triggered.connect(self.saveCamConfig)
+        self.cameraMenuSaveConfig.setEnabled(False)
+        self.cameraMenu.addActions([self.cameraMenuLoadConfig,self.cameraMenuSaveConfig])
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
@@ -550,9 +555,10 @@ class EyeTracker():
             ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
             if ffmpegPath!='':
                 import skvideo
-                skvideo.setFFmpegPath(ffmpegPath) # execute this before importing skvideo.io
+                skvideo.setFFmpegPath(ffmpegPath) # run this before importing skvideo.io
                 import skvideo.io
                 self.skvideo = skvideo
+                self.ffmpeg = ffmpegPath
         except:
             print('Unable to initialize skvideo')
                
@@ -732,7 +738,8 @@ class EyeTracker():
                         item.setEnabled(True)
                     else:
                         item.setEnabled(False)
-                self.cameraMenuConfig.setEnabled(True)
+                self.cameraMenuLoadConfig.setEnabled(False)
+                self.cameraMenuSaveConfig.setEnabled(True)
                 self.trackMenuMmPerPixMeasure.setEnabled(True)
                 if not self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setEnabled(True)
@@ -753,7 +760,8 @@ class EyeTracker():
             self.nidaq = None
         self.cameraMenuShowAllFrames.setChecked(False)
         self.cameraMenuSettings.setEnabled(False)
-        self.cameraMenuConfig.setEnabled(False)
+        self.cameraMenuLoadConfig.setEnabled(True)
+        self.cameraMenuSaveConfig.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
         self.resetPupilTracking()
@@ -919,9 +927,37 @@ class EyeTracker():
                 self.camSaveFileType = fileType
         else:
             self.camSaveFileType = fileType
+    
+    def loadCamConfig(self):
+        filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'*.json')
+        if filePath=='':
+            return
+        self.fileOpenSavePath = os.path.dirname(filePath)
+        with open(filePath,'r') as file:
+            config = json.load(file)
+        print(config)
             
     def saveCamConfig(self):
-        pass
+        filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.json')
+        if filePath=='':
+            return
+        self.fileOpenSavePath = os.path.dirname(filePath)
+        config = {'camName': self.camName,
+                  'camType': self.camType,
+                  'camSettings': {'bufferSize': self.camBufferSize,
+                                  'spatialBinning': self.camBinning,
+                                  'exposure': self.camExposure,
+                                  'frameRate': self.frameRate},
+                  'camSavePath': self.camSavePath,
+                  'camSaveBaseName': self.camSaveBaseName,
+                  'camSaveFileType': self.camSaveFileType,
+                  'ffmpeg': self.ffmpeg,
+                  'nidaq': self.nidaq,
+                  'useSaveTrigger': self.cameraMenuNidaqIn.isChecked(),
+                  'signalSavedFrames': self.cameraMenuNidaqOut.isChecked(),
+                  'showAllFrames': self.cameraMenuShowAllFrames.isChecked()}
+        with open(filePath,'w') as file:
+            json.dump(config,file)
                     
     def getVideoImage(self):
         if self.dataFileIn is not None:
