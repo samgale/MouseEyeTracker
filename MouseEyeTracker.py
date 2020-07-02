@@ -1071,7 +1071,7 @@ class EyeTracker():
                     while self.startVideoButton.isChecked():
                         isImage,image = self.cam.read()
                         image = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-                        self.processCamFrame(image,time.process_time())
+                        self.processCamFrame(image,time.perf_counter())
                         self.app.processEvents()
         else:
             if self.cam is not None:
