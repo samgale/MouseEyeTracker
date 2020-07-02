@@ -68,7 +68,6 @@ class EyeTracker():
         self.roi = None
         self.blurSigma = 2.0
         self.imgExponent = 2.0
-        self.showAllFrames = False
         self.stopTracking = False
         self.setDataNan = False
         self.pupilCenterSeed = None
@@ -168,13 +167,16 @@ class EyeTracker():
         self.cameraMenuNidaqOut.triggered.connect(self.setNidaqIO)
         self.cameraMenuNidaq.addActions([self.cameraMenuNidaqIn,self.cameraMenuNidaqOut])
         
-        self.cameraMenuSavePath = QtWidgets.QAction('Save Path',self.mainWin)
+        self.cameraMenuSavePath = QtWidgets.QAction('Set Save Path',self.mainWin)
         self.cameraMenuSavePath.triggered.connect(self.setCamSavePath)
-        self.cameraMenuSaveBaseName = QtWidgets.QAction('Save Basename',self.mainWin)
+        self.cameraMenuSaveBaseName = QtWidgets.QAction('Set Save Basename',self.mainWin)
         self.cameraMenuSaveBaseName.triggered.connect(self.setCamSaveBaseName)
-        self.cameraMenuSaveFileType = QtWidgets.QAction('Save File Type',self.mainWin)
+        self.cameraMenuSaveFileType = QtWidgets.QAction('Set Save File Type',self.mainWin)
         self.cameraMenuSaveFileType.triggered.connect(self.setCamSaveFileType)
-        self.cameraMenu.addActions([self.cameraMenuSavePath,self.cameraMenuSaveBaseName,self.cameraMenuSaveFileType])
+        self.cameraMenuConfig = QtWidgets.QAction('Save Configuration',self.mainWin)
+        self.cameraMenuConfig.triggered.connect(self.saveCamConfig)
+        self.cameraMenuConfig.setEnabled(False)
+        self.cameraMenu.addActions([self.cameraMenuSavePath,self.cameraMenuSaveBaseName,self.cameraMenuSaveFileType,self.cameraMenuConfig])
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
@@ -717,19 +719,20 @@ class EyeTracker():
                 except:
                     self.nidaq = None
                     print('Unable to initialize nidaq')
+                self.camName = selectedCam
                 self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+selectedCam+'     '+'nidaq: '+self.nidaq)
                 self.setCamProps()
                 self.frameNum = 0
                 self.initDisplay()
                 if self.camType=='webcam':
                     self.webcamDefaultFrameShape = self.image.shape
-                self.cameraMenuShowAllFrames.setChecked(True)
                 self.cameraMenuSettings.setEnabled(True)
                 for item in self.cameraMenuSettingsItems:
                     if self.camType=='vimba' or item in (self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure):
                         item.setEnabled(True)
                     else:
                         item.setEnabled(False)
+                self.cameraMenuConfig.setEnabled(True)
                 self.trackMenuMmPerPixMeasure.setEnabled(True)
                 if not self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setEnabled(True)
@@ -750,6 +753,7 @@ class EyeTracker():
             self.nidaq = None
         self.cameraMenuShowAllFrames.setChecked(False)
         self.cameraMenuSettings.setEnabled(False)
+        self.cameraMenuConfig.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
         self.resetPupilTracking()
@@ -886,6 +890,14 @@ class EyeTracker():
         self.cam.feature('AcquisitionFrameRateAbs').value = self.frameRate
         self.cam.feature('ExposureTimeAbs').value = self.camExposure*1e6/self.frameRate
         self.changePlotWindowDur()
+        
+    def setNidaqIO(self):
+        if self.mainWin.sender() is self.cameraMenuNidaqIn:
+            if self.cameraMenuNidaqIn.isChecked():
+                self.saveCheckBox.setEnabled(False)
+            else:
+                if self.cam is not None:
+                    self.saveCheckBox.setEnabled(True)
     
     def setCamSavePath(self):
         dirPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Choose Directory',self.camSavePath)
@@ -907,14 +919,9 @@ class EyeTracker():
                 self.camSaveFileType = fileType
         else:
             self.camSaveFileType = fileType
-        
-    def setNidaqIO(self):
-        if self.mainWin.sender() is self.cameraMenuNidaqIn:
-            if self.cameraMenuNidaqIn.isChecked():
-                self.saveCheckBox.setEnabled(False)
-            else:
-                if self.cam is not None:
-                    self.saveCheckBox.setEnabled(True)
+            
+    def saveCamConfig(self):
+        pass
                     
     def getVideoImage(self):
         if self.dataFileIn is not None:
