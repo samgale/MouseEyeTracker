@@ -55,6 +55,7 @@ class EyeTracker():
         self.camSavePath = self.fileOpenSavePath
         self.camSaveBaseName = 'MouseEyeTracker'
         self.camSaveFileType = '.hdf5'
+        self.camConfig = False
         self.skvideo = None
         self.ffmpeg = None
         self.nidaq = None
@@ -93,13 +94,15 @@ class EyeTracker():
         self.saccadeRefractoryPeriod = 0.1
         self.configItems = ('camName',
                             'camType',
+                            'camSavePath',
+                            'camSaveBaseName',
+                            'camSaveFileType',
                             'bufferSize',
                             'spatialBinning',
                             'exposure',
                             'frameRate',
-                            'camSavePath',
-                            'camSaveBaseName',
-                            'camSaveFileType',
+                            'roiPos',
+                            'roiSize',
                             'ffmpeg',
                             'nidaq',
                             'cameraMenuNidaqIn',
@@ -192,10 +195,12 @@ class EyeTracker():
         
         self.cameraMenuLoadConfig = QtWidgets.QAction('Load Configuration',self.mainWin)
         self.cameraMenuLoadConfig.triggered.connect(self.loadCamConfig)
+        self.cameraMenuClearConfig = QtWidgets.QAction('Clear Configuration',self.mainWin)
+        self.cameraMenuClearConfig.triggered.connect(self.clearCamConfig)
         self.cameraMenuSaveConfig = QtWidgets.QAction('Save Configuration',self.mainWin)
         self.cameraMenuSaveConfig.triggered.connect(self.saveCamConfig)
         self.cameraMenuSaveConfig.setEnabled(False)
-        self.cameraMenu.addActions([self.cameraMenuLoadConfig,self.cameraMenuSaveConfig])
+        self.cameraMenu.addActions([self.cameraMenuLoadConfig,self.camMenuClearConfig,self.cameraMenuSaveConfig])
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
@@ -613,6 +618,7 @@ class EyeTracker():
         self.addFrameNumLines()
         self.frameNum = 1
         self.getVideoImage()
+        self.resetROI()
         self.initDisplay()
         
     def loadTrackingData(self):
@@ -677,7 +683,13 @@ class EyeTracker():
                 self.closeDataFileIn()
             elif self.videoIn is not None:
                 self.closeVideo()
-            self.getCamera()
+            if self.camConfig:
+                if self.camSaveFileType=='.mp4' and self.skvideo is None:
+                    self.initSkvideo()
+                    if self.skvideo is None:
+                        self.camSaveFileType = '.hdf5'
+            else:
+                self.getCamera()
             if self.camType=='vimba':
                 self.cam = self.vimba.camera(self.camName)
                 self.cam.open()
@@ -690,9 +702,8 @@ class EyeTracker():
             self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+self.camName+'     '+'nidaq: '+self.nidaq)
             self.setCamProps()
             self.frameNum = 0
+            self.getCamImage()
             self.initDisplay()
-            if self.camType=='webcam':
-                self.webcamDefaultFrameShape = self.image.shape
             self.cameraMenuSettings.setEnabled(True)
             for item in self.cameraMenuSettingsItems:
                 if self.camType=='vimba' or item in (self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure):
@@ -744,30 +755,37 @@ class EyeTracker():
     def initNidaq(self):
         try:
             import nidaqmx
-            deviceNames = nidaqmx.system._collections.device_collection.DeviceCollection().device_names
-            selectedDevice,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
-            if ok:
-                self.nidaq = selectedDevice
-                self.nidaqDigitalIn = nidaqmx.Task()
-                self.nidaqDigitalIn.di_channels.add_di_chan(selectedDevice+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
-                self.nidaqDigitalOut = nidaqmx.Task()
-                self.nidaqDigitalOut.do_channels.add_do_chan(selectedDevice+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
-                self.cameraMenuNidaq.setEnabled(True)
-                self.cameraMenuNidaqOut.setChecked(True)
+            if not self.camConfig:
+                deviceNames = nidaqmx.system._collections.device_collection.DeviceCollection().device_names
+                selectedDevice,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
+                if ok:
+                    self.nidaq = selectedDevice
+                    self.cameraMenuNidaqOut.setChecked(True)
+                else:
+                    return
+            self.nidaqDigitalIn = nidaqmx.Task()
+            self.nidaqDigitalIn.di_channels.add_di_chan(selectedDevice+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+            self.nidaqDigitalOut = nidaqmx.Task()
+            self.nidaqDigitalOut.do_channels.add_do_chan(selectedDevice+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+            self.cameraMenuNidaq.setEnabled(True)
         except:
             self.nidaq = None
             print('Unable to initialize nidaq')
     
     def initSkvideo(self):
         try:
-            ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
-            if ffmpegPath!='':
-                import skvideo
-                skvideo.setFFmpegPath(ffmpegPath) # run this before importing skvideo.io
-                import skvideo.io
-                self.skvideo = skvideo
-                self.ffmpeg = ffmpegPath
+            if self.ffmpeg is None:
+                ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
+                if ffmpegPath!='':
+                    self.ffmpeg = ffmpegPath
+                else:
+                    return
+            import skvideo
+            skvideo.setFFmpegPath(self.ffmpeg) # run this before importing skvideo.io
+            import skvideo.io
+            self.skvideo = skvideo
         except:
+            self.ffmpeg = None
             print('Unable to initialize skvideo')
             
     def closeCamera(self):
@@ -832,18 +850,22 @@ class EyeTracker():
         self.stopCamera()
             
     def setCamProps(self):
-        self.camBinning = 1
         if self.camType=='vimba':
-            self.frameRate = 60.0
-            self.camBufferSize = 60
-            self.camExposure = 0.9
+            if not self.camConfig:
+                self.camBufferSize = 60
+                self.camBinning = 1
+                self.camExposure = 0.9
+                self.frameRate = 60.0
+                self.roiPos = (0,0)
+                self.roiSize = (self.cam.feature('WidthMax').value,self.cam.feature('HeightMax').value)
+            self.roiInd = np.s_[0:self.roiSize[1],0:self.roiSize[0]]
             self.cam.feature('PixelFormat').value ='Mono8'
-            self.cam.feature('BinningHorizontal').value = 1
-            self.cam.feature('BinningVertical').value = 1
-            self.cam.feature('OffsetX').value = 0
-            self.cam.feature('OffsetY').value = 0
-            self.cam.feature('Width').value = self.cam.feature('WidthMax').value
-            self.cam.feature('Height').value = self.cam.feature('HeightMax').value
+            self.cam.feature('BinningHorizontal').value = self.camBinning
+            self.cam.feature('BinningVertical').value = self.camBinning
+            self.cam.feature('OffsetX').value = self.roiPos[0]
+            self.cam.feature('OffsetY').value = self.roiPos[1]
+            self.cam.feature('Width').value = self.roiSize[0]
+            self.cam.feature('Height').value = self.roiSize[1]
             self.cam.feature('ExposureAuto').value = 'Off'
             self.cam.feature('ExposureTimeAbs').value = self.camExposure*1e6/self.frameRate
             self.cam.feature('AcquisitionFrameRateAbs').value = self.frameRate
@@ -854,10 +876,21 @@ class EyeTracker():
             self.cam.feature('SyncOutSource').value = 'Exposing'
             self.cam.feature('SyncOutPolarity').value = 'Normal'
         else:
-            self.frameRate = np.nan
             self.camBufferSize = None
-            self.camExposure = 1
+            self.frameRate = np.nan
+            if not self.camConfig:
+                self.camBinning = 1
+                self.camExposure = 1
+                self.roiPos = (0,0)
+                self.roiSize = (self.cam.get(cv2.CAP_PROP_FRAME_HEIGHT),self.cam.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.roiInd = np.s_[self.roiPos[1]:self.roiPos[1]+self.roiSize[1],self.roiPos[0]:self.roiPos[0]+self.roiSize[0]]
+            self.webcamDefaultFrameShape = (self.cam.get(cv2.CAP_PROP_FRAME_HEIGHT),self.cam.get(cv2.CAP_PROP_FRAME_WIDTH))
+            if self.camBinning>1:
+                h,w = [int(n/self.camBinning) for n in self.webcamDefaultFrameShape]
+                self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT,h)
+                self.cam.set(cv2.CAP_PROP_FRAME_WIDTH,w)
             self.cam.set(cv2.CAP_PROP_EXPOSURE,math.log(self.camExposure/1000,2))
+        self.fullRoiSize = self.roiSize
         
     def setCamBufferSize(self):
         val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
@@ -965,6 +998,10 @@ class EyeTracker():
                 attr.setChecked(config[item])
             else:
                 setattr(self,item,config[item])
+        self.camConfig = True
+    
+    def clearCamConfig(self):
+        self.camConfig = False
             
     def saveCamConfig(self):
         filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.json')
@@ -1031,7 +1068,6 @@ class EyeTracker():
             self.updateDisplay()
                     
     def initDisplay(self):
-        self.resetROI()
         self.resetImage()
         self.setDataPlotDur()
         self.setDataPlotTime()
@@ -1176,7 +1212,7 @@ class EyeTracker():
         self.image = img
         showAll = False
         showNone = False
-        if self.saveCheckBox.isChecked() or (self.cameraMenuNidaqIn.isChecked() and self.nidaqDigitalIn.read()):
+        if self.saveCheckBox.isChecked() or (self.nidaq and self.cameraMenuNidaqIn.isChecked() and self.nidaqDigitalIn.read()):
             if self.dataFileOut is None:
                 self.frameNum = 0
                 if self.cameraMenuNidaqIn.isChecked():
@@ -1193,7 +1229,7 @@ class EyeTracker():
                     self.videoOut = self.skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
                 showNone = True
             else:
-                if self.nidaq is not None:
+                if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(True)
                 if self.camType=='vimba':
                     timestamp /= self.cam.GevTimestampTickFrequency
@@ -1204,7 +1240,7 @@ class EyeTracker():
                     self.frameDataset[-1] = img[self.roiInd]
                 else:
                     self.videoOut.writeFrame(img[self.roiInd])
-                if self.nidaq is not None:
+                if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(False)
                 showAll = self.cameraMenuShowAllFrames.isChecked()
         elif self.dataFileOut is not None:
