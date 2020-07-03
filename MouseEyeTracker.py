@@ -91,6 +91,20 @@ class EyeTracker():
         self.saccadeSmoothPts = 3
         self.saccadeThresh = 5
         self.saccadeRefractoryPeriod = 0.1
+        self.configItems = ('camName',
+                            'camType',
+                            'bufferSize',
+                            'spatialBinning',
+                            'exposure',
+                            'frameRate',
+                            'camSavePath',
+                            'camSaveBaseName',
+                            'camSaveFileType',
+                            'ffmpeg',
+                            'nidaq',
+                            'cameraMenuNidaqIn',
+                            'cameraMenuNidaqOut',
+                            'cameraMenuShowAllFrames')
         
         # main window
         winWidth = 1000
@@ -518,7 +532,7 @@ class EyeTracker():
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
         if self.skvideo is None:
-            self.importSkvideo()
+            self.initSkvideo()
             if self.skvideo is None:
                 return
         startFrame,endFrame = self.getFrameSaveRange()
@@ -549,18 +563,6 @@ class EyeTracker():
         if endFrame>self.numFrames:
             endFrame = self.numFrames
         return startFrame,endFrame
-    
-    def importSkvideo(self):
-        try:
-            ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
-            if ffmpegPath!='':
-                import skvideo
-                skvideo.setFFmpegPath(ffmpegPath) # run this before importing skvideo.io
-                import skvideo.io
-                self.skvideo = skvideo
-                self.ffmpeg = ffmpegPath
-        except:
-            print('Unable to initialize skvideo')
                
     def loadFrameData(self):
         filePath,fileType = QtWidgets.QFileDialog.getOpenFileName(self.mainWin,'Choose File',self.fileOpenSavePath,'')
@@ -675,76 +677,98 @@ class EyeTracker():
                 self.closeDataFileIn()
             elif self.videoIn is not None:
                 self.closeVideo()
-            try:
-                if self.vimba is None:
-                    import pymba
-                    self.vimba = pymba.Vimba()
-                self.vimba.startup()
-                self.vimba.system().run_feature_command("GeVDiscoveryAllOnce")
-                time.sleep(0.2)
-                vimbaCams = self.vimba.camera_ids()
-            except:
-                if self.vimba is not None:
-                    self.vimba.shutdown()
-                vimbaCams = []
-                print('Unable to initialize vimba')
-            webcams = []
-            i = 0
-            while True:
-                cam = cv2.VideoCapture(i)
-                isImage,image = cam.read()
-                if isImage:
-                    webcams.append('webcam'+str(i))
-                    i += 1
-                else:
-                    break
-            selectedCam,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',vimbaCams+webcams,editable=False)
-            if ok:
-                if selectedCam in vimbaCams:
-                    self.camType = 'vimba'
-                    self.cam = self.vimba.camera(selectedCam)
-                    self.cam.open()
-                else:
-                    self.camType = 'webcam'
-                    self.cam = cv2.VideoCapture(int(selectedCam[6:]))
-            if self.cam is None:
-                self.cameraMenuUseCam.setChecked(False)
+            self.getCamera()
+            if self.camType=='vimba':
+                self.cam = self.vimba.camera(self.camName)
+                self.cam.open()
+            elif self.camType=='webcam':
+                self.cam = cv2.VideoCapture(int(self.camName[6:]))
             else:
-                try:
-                    import nidaqmx
-                    deviceNames = nidaqmx.system._collections.device_collection.DeviceCollection().device_names
-                    selectedDevice,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
-                    if ok:
-                        self.nidaq = selectedDevice
-                        self.nidaqDigitalIn = nidaqmx.Task()
-                        self.nidaqDigitalIn.di_channels.add_di_chan(selectedDevice+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
-                        self.nidaqDigitalOut = nidaqmx.Task()
-                        self.nidaqDigitalOut.do_channels.add_do_chan(selectedDevice+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
-                        self.cameraMenuNidaq.setEnabled(True)
-                        self.cameraMenuNidaqOut.setChecked(True)
-                except:
-                    self.nidaq = None
-                    print('Unable to initialize nidaq')
-                self.camName = selectedCam
-                self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+selectedCam+'     '+'nidaq: '+self.nidaq)
-                self.setCamProps()
-                self.frameNum = 0
-                self.initDisplay()
-                if self.camType=='webcam':
-                    self.webcamDefaultFrameShape = self.image.shape
-                self.cameraMenuSettings.setEnabled(True)
-                for item in self.cameraMenuSettingsItems:
-                    if self.camType=='vimba' or item in (self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure):
-                        item.setEnabled(True)
-                    else:
-                        item.setEnabled(False)
-                self.cameraMenuLoadConfig.setEnabled(False)
-                self.cameraMenuSaveConfig.setEnabled(True)
-                self.trackMenuMmPerPixMeasure.setEnabled(True)
-                if not self.cameraMenuNidaqIn.isChecked():
-                    self.saveCheckBox.setEnabled(True)
+                self.cameraMenuUseCam.setChecked(False)
+                return
+            self.initNidaq()
+            self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+self.camName+'     '+'nidaq: '+self.nidaq)
+            self.setCamProps()
+            self.frameNum = 0
+            self.initDisplay()
+            if self.camType=='webcam':
+                self.webcamDefaultFrameShape = self.image.shape
+            self.cameraMenuSettings.setEnabled(True)
+            for item in self.cameraMenuSettingsItems:
+                if self.camType=='vimba' or item in (self.cameraMenuSettingsBinning,self.cameraMenuSettingsExposure):
+                    item.setEnabled(True)
+                else:
+                    item.setEnabled(False)
+            self.cameraMenuLoadConfig.setEnabled(False)
+            self.cameraMenuSaveConfig.setEnabled(True)
+            self.trackMenuMmPerPixMeasure.setEnabled(True)
+            if not self.cameraMenuNidaqIn.isChecked():
+                self.saveCheckBox.setEnabled(True)
         else:
-            self.closeCamera() 
+            self.closeCamera()
+            
+    def getCamera(self):
+        self.initVimba()
+        vimbaCams = [] if self.vimba is None else self.vimba.camera_ids()
+        webcams = []
+        i = 0
+        while True:
+            cam = cv2.VideoCapture(i)
+            isImage,image = cam.read()
+            if isImage:
+                webcams.append('webcam'+str(i))
+                i += 1
+            else:
+                break
+        selectedCam,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Camera','Camera IDs:',vimbaCams+webcams,editable=False)
+        if ok:
+            self.camName = selectedCam
+            self.camType = 'vimba' if selectedCam in vimbaCams else 'webcam'
+        else:
+            self.camName = self.camType = None
+            
+    def initVimba(self):
+        try:
+            if self.vimba is None:
+                import pymba
+                self.vimba = pymba.Vimba()
+            self.vimba.startup()
+            self.vimba.system().run_feature_command("GeVDiscoveryAllOnce")
+            time.sleep(0.2)
+        except:
+            if self.vimba is not None:
+                self.vimba.shutdown()
+                self.vimba = None
+            print('Unable to initialize vimba')
+    
+    def initNidaq(self):
+        try:
+            import nidaqmx
+            deviceNames = nidaqmx.system._collections.device_collection.DeviceCollection().device_names
+            selectedDevice,ok = QtWidgets.QInputDialog.getItem(self.mainWin,'Choose Nidaq Device','Nidaq Devices:',deviceNames,editable=False)
+            if ok:
+                self.nidaq = selectedDevice
+                self.nidaqDigitalIn = nidaqmx.Task()
+                self.nidaqDigitalIn.di_channels.add_di_chan(selectedDevice+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+                self.nidaqDigitalOut = nidaqmx.Task()
+                self.nidaqDigitalOut.do_channels.add_do_chan(selectedDevice+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+                self.cameraMenuNidaq.setEnabled(True)
+                self.cameraMenuNidaqOut.setChecked(True)
+        except:
+            self.nidaq = None
+            print('Unable to initialize nidaq')
+    
+    def initSkvideo(self):
+        try:
+            ffmpegPath = QtWidgets.QFileDialog.getExistingDirectory(self.mainWin,'Select directory containing ffmpeg.exe','')
+            if ffmpegPath!='':
+                import skvideo
+                skvideo.setFFmpegPath(ffmpegPath) # run this before importing skvideo.io
+                import skvideo.io
+                self.skvideo = skvideo
+                self.ffmpeg = ffmpegPath
+        except:
+            print('Unable to initialize skvideo')
             
     def closeCamera(self):
         self.turnOffButtons()
@@ -922,7 +946,7 @@ class EyeTracker():
         if not ok:
             return
         if fileType=='.mp4' and self.skvideo is None:
-            self.importSkvideo()
+            self.initSkvideo()
             if self.skvideo is not None:
                 self.camSaveFileType = fileType
         else:
@@ -935,27 +959,25 @@ class EyeTracker():
         self.fileOpenSavePath = os.path.dirname(filePath)
         with open(filePath,'r') as file:
             config = json.load(file)
-        print(config)
+        for item in self.configItems:
+            attr = getattr(self,item)
+            if isinstance(attr,QtWidgets.QAction):
+                attr.setChecked(config[item])
+            else:
+                setattr(self,item,config[item])
             
     def saveCamConfig(self):
         filePath,fileType = QtWidgets.QFileDialog.getSaveFileName(self.mainWin,'Save As',self.fileOpenSavePath,'*.json')
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        config = {'camName': self.camName,
-                  'camType': self.camType,
-                  'camSettings': {'bufferSize': self.camBufferSize,
-                                  'spatialBinning': self.camBinning,
-                                  'exposure': self.camExposure,
-                                  'frameRate': self.frameRate},
-                  'camSavePath': self.camSavePath,
-                  'camSaveBaseName': self.camSaveBaseName,
-                  'camSaveFileType': self.camSaveFileType,
-                  'ffmpeg': self.ffmpeg,
-                  'nidaq': self.nidaq,
-                  'useSaveTrigger': self.cameraMenuNidaqIn.isChecked(),
-                  'signalSavedFrames': self.cameraMenuNidaqOut.isChecked(),
-                  'showAllFrames': self.cameraMenuShowAllFrames.isChecked()}
+        config = {}
+        for item in self.configItems:
+            attr = getattr(self,item)
+            if isinstance(attr,QtWidgets.QAction):
+                config[item] = attr.isChecked()
+            else:
+                config[item] = attr
         with open(filePath,'w') as file:
             json.dump(config,file)
                     
