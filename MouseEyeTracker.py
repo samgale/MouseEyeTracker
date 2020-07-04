@@ -97,9 +97,9 @@ class EyeTracker():
                             'camSavePath',
                             'camSaveBaseName',
                             'camSaveFileType',
-                            'bufferSize',
-                            'spatialBinning',
-                            'exposure',
+                            'camBufferSize',
+                            'camBinning',
+                            'camExposure',
                             'frameRate',
                             'roiPos',
                             'roiSize',
@@ -161,8 +161,19 @@ class EyeTracker():
         self.cameraMenu = self.menuBar.addMenu('Camera')         
         self.cameraMenuUseCam = QtWidgets.QAction('Use Camera',self.mainWin,checkable=True)
         self.cameraMenuUseCam.triggered.connect(self.initCamera)
+        self.cameraMenu.addAction(self.cameraMenuUseCam)
+        
+        self.cameraMenuLoadConfig = QtWidgets.QAction('Load Configuration',self.mainWin)
+        self.cameraMenuLoadConfig.triggered.connect(self.loadCamConfig)
+        self.cameraMenuClearConfig = QtWidgets.QAction('Clear Configuration',self.mainWin)
+        self.cameraMenuClearConfig.triggered.connect(self.clearCamConfig)
+        self.cameraMenuSaveConfig = QtWidgets.QAction('Save Configuration',self.mainWin)
+        self.cameraMenuSaveConfig.triggered.connect(self.saveCamConfig)
+        self.cameraMenuSaveConfig.setEnabled(False)
+        self.cameraMenu.addActions([self.cameraMenuLoadConfig,self.cameraMenuClearConfig,self.cameraMenuSaveConfig])
+        
         self.cameraMenuShowAllFrames = QtWidgets.QAction('Show All Frames',self.mainWin,checkable=True)
-        self.cameraMenu.addActions([self.cameraMenuUseCam,self.cameraMenuShowAllFrames])
+        self.cameraMenu.addAction(self.cameraMenuShowAllFrames)
         
         self.cameraMenuSettings = self.cameraMenu.addMenu('Settings')
         self.cameraMenuSettings.setEnabled(False)
@@ -192,15 +203,6 @@ class EyeTracker():
         self.cameraMenuSetSaveFileType = QtWidgets.QAction('Set Save File Type',self.mainWin)
         self.cameraMenuSetSaveFileType.triggered.connect(self.setCamSaveFileType)
         self.cameraMenu.addActions([self.cameraMenuSetSavePath,self.cameraMenuSetSaveBaseName,self.cameraMenuSetSaveFileType])
-        
-        self.cameraMenuLoadConfig = QtWidgets.QAction('Load Configuration',self.mainWin)
-        self.cameraMenuLoadConfig.triggered.connect(self.loadCamConfig)
-        self.cameraMenuClearConfig = QtWidgets.QAction('Clear Configuration',self.mainWin)
-        self.cameraMenuClearConfig.triggered.connect(self.clearCamConfig)
-        self.cameraMenuSaveConfig = QtWidgets.QAction('Save Configuration',self.mainWin)
-        self.cameraMenuSaveConfig.triggered.connect(self.saveCamConfig)
-        self.cameraMenuSaveConfig.setEnabled(False)
-        self.cameraMenu.addActions([self.cameraMenuLoadConfig,self.camMenuClearConfig,self.cameraMenuSaveConfig])
         
         # tracking options menu
         self.trackMenu = self.menuBar.addMenu('Track')
@@ -684,6 +686,8 @@ class EyeTracker():
             elif self.videoIn is not None:
                 self.closeVideo()
             if self.camConfig:
+                if self.camType=='vimba':
+                    self.initVimba()
                 if self.camSaveFileType=='.mp4' and self.skvideo is None:
                     self.initSkvideo()
                     if self.skvideo is None:
@@ -695,11 +699,12 @@ class EyeTracker():
                 self.cam.open()
             elif self.camType=='webcam':
                 self.cam = cv2.VideoCapture(int(self.camName[6:]))
+                self.cameraMenuShowAllFrames.setChecked(True)
             else:
                 self.cameraMenuUseCam.setChecked(False)
                 return
             self.initNidaq()
-            self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+self.camName+'     '+'nidaq: '+self.nidaq)
+            self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+self.camName+'     '+'nidaq: '+str(self.nidaq))
             self.setCamProps()
             self.frameNum = 0
             self.getCamImage()
@@ -711,6 +716,7 @@ class EyeTracker():
                 else:
                     item.setEnabled(False)
             self.cameraMenuLoadConfig.setEnabled(False)
+            self.cameraMenuClearConfig.setEnabled(False)
             self.cameraMenuSaveConfig.setEnabled(True)
             self.trackMenuMmPerPixMeasure.setEnabled(True)
             if not self.cameraMenuNidaqIn.isChecked():
@@ -764,9 +770,9 @@ class EyeTracker():
                 else:
                     return
             self.nidaqDigitalIn = nidaqmx.Task()
-            self.nidaqDigitalIn.di_channels.add_di_chan(selectedDevice+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+            self.nidaqDigitalIn.di_channels.add_di_chan(self.nidaq+'/port0/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
             self.nidaqDigitalOut = nidaqmx.Task()
-            self.nidaqDigitalOut.do_channels.add_do_chan(selectedDevice+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
+            self.nidaqDigitalOut.do_channels.add_do_chan(self.nidaq+'/port1/line0',line_grouping=nidaqmx.constants.LineGrouping.CHAN_PER_LINE)
             self.cameraMenuNidaq.setEnabled(True)
         except:
             self.nidaq = None
@@ -803,6 +809,7 @@ class EyeTracker():
         self.cameraMenuShowAllFrames.setChecked(False)
         self.cameraMenuSettings.setEnabled(False)
         self.cameraMenuLoadConfig.setEnabled(True)
+        self.cameraMenuClearConfig.setEnabled(True)
         self.cameraMenuSaveConfig.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
@@ -852,16 +859,18 @@ class EyeTracker():
     def setCamProps(self):
         if self.camType=='vimba':
             if not self.camConfig:
-                self.camBufferSize = 60
                 self.camBinning = 1
+            self.cam.feature('BinningHorizontal').value = self.camBinning
+            self.cam.feature('BinningVertical').value = self.camBinning
+            self.fullRoiSize = (self.cam.feature('WidthMax').value,self.cam.feature('HeightMax').value)
+            if not self.camConfig:
+                self.camBufferSize = 60
                 self.camExposure = 0.9
                 self.frameRate = 60.0
                 self.roiPos = (0,0)
-                self.roiSize = (self.cam.feature('WidthMax').value,self.cam.feature('HeightMax').value)
+                self.roiSize = self.fullRoiSize
             self.roiInd = np.s_[0:self.roiSize[1],0:self.roiSize[0]]
             self.cam.feature('PixelFormat').value ='Mono8'
-            self.cam.feature('BinningHorizontal').value = self.camBinning
-            self.cam.feature('BinningVertical').value = self.camBinning
             self.cam.feature('OffsetX').value = self.roiPos[0]
             self.cam.feature('OffsetY').value = self.roiPos[1]
             self.cam.feature('Width').value = self.roiSize[0]
@@ -878,19 +887,21 @@ class EyeTracker():
         else:
             self.camBufferSize = None
             self.frameRate = np.nan
+            self.webcamDefaultFrameShape = (int(self.cam.get(cv2.CAP_PROP_FRAME_HEIGHT)),int(self.cam.get(cv2.CAP_PROP_FRAME_WIDTH)))
             if not self.camConfig:
                 self.camBinning = 1
                 self.camExposure = 1
                 self.roiPos = (0,0)
-                self.roiSize = (self.cam.get(cv2.CAP_PROP_FRAME_HEIGHT),self.cam.get(cv2.CAP_PROP_FRAME_WIDTH))
+                self.roiSize = self.webcamDefaultFrameShape[::-1]
             self.roiInd = np.s_[self.roiPos[1]:self.roiPos[1]+self.roiSize[1],self.roiPos[0]:self.roiPos[0]+self.roiSize[0]]
-            self.webcamDefaultFrameShape = (self.cam.get(cv2.CAP_PROP_FRAME_HEIGHT),self.cam.get(cv2.CAP_PROP_FRAME_WIDTH))
             if self.camBinning>1:
                 h,w = [int(n/self.camBinning) for n in self.webcamDefaultFrameShape]
                 self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT,h)
                 self.cam.set(cv2.CAP_PROP_FRAME_WIDTH,w)
+                self.fullRoiSize = (w,h)
+            else:
+                self.fullRoiSize = self.webcamDefaultFrameShape[::-1]
             self.cam.set(cv2.CAP_PROP_EXPOSURE,math.log(self.camExposure/1000,2))
-        self.fullRoiSize = self.roiSize
         
     def setCamBufferSize(self):
         val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Camera Buffer Size','Frames:',value=self.camBufferSize,min=1)
@@ -993,12 +1004,14 @@ class EyeTracker():
         with open(filePath,'r') as file:
             config = json.load(file)
         for item in self.configItems:
-            attr = getattr(self,item)
+            attr = getattr(self,item,None)
             if isinstance(attr,QtWidgets.QAction):
                 attr.setChecked(config[item])
             else:
                 setattr(self,item,config[item])
         self.camConfig = True
+        self.cameraMenuUseCam.setChecked(True)
+        self.initCamera()
     
     def clearCamConfig(self):
         self.camConfig = False
@@ -1076,7 +1089,7 @@ class EyeTracker():
         self.setDataPlotXRange()
         self.trackMenu.setEnabled(True)
                
-    def resetROI(self):
+    def resetROI(self,keepPosAndSize=False):
         if self.cam is not None:
             if self.camType=='vimba':
                 self.cam.feature('OffsetX').value = 0
@@ -1084,10 +1097,11 @@ class EyeTracker():
                 self.cam.feature('Width').value = self.cam.feature('WidthMax').value
                 self.cam.feature('Height').value = self.cam.feature('HeightMax').value
             self.getCamImage()
-        self.roiPos = (0,0)
-        self.roiSize = (self.image.shape[1],self.image.shape[0])
         self.fullRoiSize = (self.image.shape[1],self.image.shape[0])
-        self.roiInd = np.s_[0:self.roiSize[1],0:self.roiSize[0]]
+        self.roiInd = np.s_[0:self.fullRoiSize[1],0:self.fullRoiSize[0]]
+        if not keepPosAndSize:
+            self.roiPos = (0,0)
+            self.roiSize = (self.image.shape[1],self.image.shape[0])
         
     def resetImage(self):
         self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
@@ -1210,7 +1224,7 @@ class EyeTracker():
     def processCamFrame(self,img,timestamp):
         self.frameNum += 1
         self.image = img
-        showAll = False
+        showAll = self.cameraMenuShowAllFrames.isChecked()
         showNone = False
         if self.saveCheckBox.isChecked() or (self.nidaq and self.cameraMenuNidaqIn.isChecked() and self.nidaqDigitalIn.read()):
             if self.dataFileOut is None:
@@ -1228,6 +1242,7 @@ class EyeTracker():
                 else:
                     self.videoOut = self.skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
                 showNone = True
+                showAll = False
             else:
                 if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(True)
@@ -1242,7 +1257,6 @@ class EyeTracker():
                     self.videoOut.writeFrame(img[self.roiInd])
                 if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(False)
-                showAll = self.cameraMenuShowAllFrames.isChecked()
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
             showNone = True
@@ -1464,51 +1478,51 @@ class EyeTracker():
     def setROI(self):
         if self.roiButton.isChecked():
             self.turnOffButtons(source=self.roiButton)
-            maxBoundsRect = self.imageViewBox.itemBoundingRect(self.imageItem)
+            self.resetROI(keepPosAndSize=True)
+            self.resetImage()
             if self.roi is None:
-                self.roi = pg.ROI((0,0),self.fullRoiSize,maxBounds=maxBoundsRect,pen='r')
+                self.roi = pg.ROI(self.roiPos,self.roiSize,maxBounds=None,pen='r')
                 self.roi.addScaleHandle(pos=(1,1),center=(0.5,0.5))
                 self.imageViewBox.addItem(self.roi)
             else:
-                self.roi.setPos((0,0))
-                self.roi.setSize(self.fullRoiSize)
                 self.roi.setVisible(True)
-            self.pupilCenter += self.roiPos
-            self.reflectCenter += self.roiPos
-            if self.pupilCenterSeed is not None:
-                self.pupilCenterSeed = (self.pupilCenterSeed[0]+self.roiPos[0],self.pupilCenterSeed[1]+self.roiPos[1])
-            if self.reflectCenterSeed is not None:
-                self.reflectCenterSeed = (self.reflectCenterSeed[0]+self.roiPos[0],self.reflectCenterSeed[1]+self.roiPos[1])
-            if self.pupilRoi is not None:
-                self.pupilRoiPos[0] += self.roiPos[0]
-                self.pupilRoiPos[1] += self.roiPos[1]
-            for i,roi in enumerate(self.reflectRoi):
-                self.reflectRoiPos[i][0] += self.roiPos[0]
-                self.reflectRoiPos[i][1] += self.roiPos[1]
-            if len(self.maskRoi)>0:
-                for roi in self.maskRoi:
-                    roi.setPos((roi.pos()[0]+self.roiPos[0],roi.pos()[1]+self.roiPos[1]))
-                self.updateMaskIndex()
-            self.resetROI()
-            self.resetImage()
         else:
-            self.roiPos = [int(n) for n in self.roi.pos()]
-            self.roiSize = [int(n) for n in self.roi.size()]
-            self.pupilCenter -= self.roiPos
-            self.reflectCenter -= self.roiPos
+            newPos = []
+            for p,maxSize in zip(self.roi.pos(),self.fullRoiSize):
+                if p<0:
+                    newPos.append(0)
+                elif p>maxSize-1:
+                    newPos.append(maxSize-1)
+                else:
+                    newPos.append(int(p))
+            newSize = []
+            for s,p,maxSize in zip(self.roi.size(),newPos,self.fullRoiSize):
+                if s<1:
+                    newSize.append(1)
+                elif p+s>maxSize:
+                    newSize.append(maxSize-p)
+                else:
+                    newSize.append(int(s))    
+            self.roi.setPos(newPos)
+            self.roi.setSize(newSize)
+            deltaPos = [newPos[i]-self.roiPos[i] for i in (0,1)]
+            self.roiPos = newPos
+            self.roiSize = newSize
+            self.pupilCenter -= deltaPos
+            self.reflectCenter -= deltaPos
             if self.pupilCenterSeed is not None:
-                self.pupilCenterSeed = (self.pupilCenterSeed[0]-self.roiPos[0],self.pupilCenterSeed[1]-self.roiPos[1])
+                self.pupilCenterSeed = (self.pupilCenterSeed[0]-deltaPos[0],self.pupilCenterSeed[1]-deltaPos[1])
             if self.reflectCenterSeed is not None:
-                self.reflectCenterSeed = (self.reflectCenterSeed[0]-self.roiPos[0],self.reflectCenterSeed[1]-self.roiPos[1])
+                self.reflectCenterSeed = (self.reflectCenterSeed[0]-deltaPos[0],self.reflectCenterSeed[1]-deltaPos[1])
             if self.pupilRoi is not None:
-                self.pupilRoiPos[0] -= self.roiPos[0]
-                self.pupilRoiPos[1] -= self.roiPos[1]
+                self.pupilRoiPos[0] -= deltaPos[0]
+                self.pupilRoiPos[1] -= deltaPos[1]
             for i,roi in enumerate(self.reflectRoi):
-                self.reflectRoiPos[i][0] -= self.roiPos[0]
-                self.reflectRoiPos[i][1] -= self.roiPos[1]
+                self.reflectRoiPos[i][0] -= deltaPos[0]
+                self.reflectRoiPos[i][1] -= deltaPos[1]
             if len(self.maskRoi)>0:
                 for roi in self.maskRoi:
-                    roi.setPos((roi.pos()[0]-self.roiPos[0],roi.pos()[1]-self.roiPos[1]))
+                    roi.setPos((roi.pos()[0]-deltaPos[0],roi.pos()[1]-deltaPos[1]))
                 self.updateMaskIndex()       
             if self.cam is None or self.camType=='webcam':
                 self.roiInd = np.s_[self.roiPos[1]:self.roiPos[1]+self.roiSize[1],self.roiPos[0]:self.roiPos[0]+self.roiSize[0]]
