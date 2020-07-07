@@ -938,22 +938,23 @@ class EyeTracker():
         val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.camBinning,min=1,max=8)
         if not ok:
             return
-        scaleFactor = self.camBinning/val
-        if self.pupilCenterSeed is not None:
-            self.pupilCenterSeed = [int(n*scaleFactor) for n in self.pupilCenterSeed]
-        if self.reflectCenterSeed is not None:
-            self.reflectCenterSeed = [int(n*scaleFactor) for n in self.reflectCenterSeed]
-        if self.pupilRoi is not None:
-            self.pupilRoiPos = [int(n*scaleFactor) for n in self.pupilRoiPos]
-            self.pupilRoiSize = [int(n*scaleFactor) for n in self.pupilRoiSize]
-        for i,roi in enumerate(self.reflectRoi):
-            self.reflectRoiPos[i] = [int(n*scaleFactor) for n in roi.pos()]
-            self.reflectRoiSize[i] = [int(n*scaleFactor) for n in roi.size()]
-        if len(self.maskRoi)>0:
-            for roi in self.maskRoi:
-                roi.setPos([int(n*scaleFactor) for n in roi.pos()])
-                roi.setSize([int(n*scaleFactor) for n in roi.size()])
-            self.updateMaskIndex()
+        if self.optionsMenuShowTracking.isChecked():
+            scaleFactor = self.camBinning/val
+            if self.pupilCenterSeed is not None:
+                self.pupilCenterSeed = [int(n*scaleFactor) for n in self.pupilCenterSeed]
+            if self.reflectCenterSeed is not None:
+                self.reflectCenterSeed = [int(n*scaleFactor) for n in self.reflectCenterSeed]
+            if self.pupilRoi is not None:
+                self.pupilRoiPos = [int(n*scaleFactor) for n in self.pupilRoiPos]
+                self.pupilRoiSize = [int(n*scaleFactor) for n in self.pupilRoiSize]
+            for i,roi in enumerate(self.reflectRoi):
+                self.reflectRoiPos[i] = [int(n*scaleFactor) for n in roi.pos()]
+                self.reflectRoiSize[i] = [int(n*scaleFactor) for n in roi.size()]
+            if len(self.maskRoi)>0:
+                for roi in self.maskRoi:
+                    roi.setPos([int(n*scaleFactor) for n in roi.pos()])
+                    roi.setSize([int(n*scaleFactor) for n in roi.size()])
+                self.updateMaskIndex()
         self.camBinning = val
         if self.camType=='vimba':
             self.cam.feature('BinningHorizontal').value = val
@@ -1548,28 +1549,29 @@ class EyeTracker():
                 elif p+s>maxSize:
                     newSize.append(maxSize-p)
                 else:
-                    newSize.append(int(s))    
+                    newSize.append(int(s))
+            if self.optionsMenuShowTracking.isChecked():
+                deltaPos = [newPos[i]-self.roiPos[i] for i in (0,1)]
+                self.pupilCenter -= deltaPos
+                self.reflectCenter -= deltaPos
+                if self.pupilCenterSeed is not None:
+                    self.pupilCenterSeed = (self.pupilCenterSeed[0]-deltaPos[0],self.pupilCenterSeed[1]-deltaPos[1])
+                if self.reflectCenterSeed is not None:
+                    self.reflectCenterSeed = (self.reflectCenterSeed[0]-deltaPos[0],self.reflectCenterSeed[1]-deltaPos[1])
+                if self.pupilRoi is not None:
+                    self.pupilRoiPos[0] -= deltaPos[0]
+                    self.pupilRoiPos[1] -= deltaPos[1]
+                for i,roi in enumerate(self.reflectRoi):
+                    self.reflectRoiPos[i][0] -= deltaPos[0]
+                    self.reflectRoiPos[i][1] -= deltaPos[1]
+                if len(self.maskRoi)>0:
+                    for roi in self.maskRoi:
+                        roi.setPos((roi.pos()[0]-deltaPos[0],roi.pos()[1]-deltaPos[1]))
+                    self.updateMaskIndex()
             self.roi.setPos(newPos)
             self.roi.setSize(newSize)
-            deltaPos = [newPos[i]-self.roiPos[i] for i in (0,1)]
             self.roiPos = newPos
             self.roiSize = newSize
-            self.pupilCenter -= deltaPos
-            self.reflectCenter -= deltaPos
-            if self.pupilCenterSeed is not None:
-                self.pupilCenterSeed = (self.pupilCenterSeed[0]-deltaPos[0],self.pupilCenterSeed[1]-deltaPos[1])
-            if self.reflectCenterSeed is not None:
-                self.reflectCenterSeed = (self.reflectCenterSeed[0]-deltaPos[0],self.reflectCenterSeed[1]-deltaPos[1])
-            if self.pupilRoi is not None:
-                self.pupilRoiPos[0] -= deltaPos[0]
-                self.pupilRoiPos[1] -= deltaPos[1]
-            for i,roi in enumerate(self.reflectRoi):
-                self.reflectRoiPos[i][0] -= deltaPos[0]
-                self.reflectRoiPos[i][1] -= deltaPos[1]
-            if len(self.maskRoi)>0:
-                for roi in self.maskRoi:
-                    roi.setPos((roi.pos()[0]-deltaPos[0],roi.pos()[1]-deltaPos[1]))
-                self.updateMaskIndex()       
             if self.cam is None or self.camType=='webcam':
                 self.roiInd = np.s_[self.roiPos[1]:self.roiPos[1]+self.roiSize[1],self.roiPos[0]:self.roiPos[0]+self.roiSize[0]]
             else:
