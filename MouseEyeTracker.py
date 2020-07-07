@@ -67,6 +67,7 @@ class EyeTracker():
         self.dataFileIn = None
         self.dataFileOut = None
         self.image = None
+        self.displayUpdateInterval = 1
         self.roi = None
         self.blurSigma = 2.0
         self.imgExponent = 2.0
@@ -101,26 +102,18 @@ class EyeTracker():
                             'camBinning',
                             'camExposure',
                             'frameRate',
+                            'displayUpdateInterval',
                             'roiPos',
                             'roiSize',
                             'ffmpeg',
                             'nidaq',
                             'cameraMenuNidaqIn',
-                            'cameraMenuNidaqOut',
-                            'cameraMenuShowAllFrames')
+                            'cameraMenuNidaqOut')
         
         # main window
-        winWidth = 1000
-        winHeight = 500
         self.mainWin = QtWidgets.QMainWindow()
         self.mainWin.setWindowTitle('MouseEyeTracker')
-        self.mainWin.keyPressEvent = self.mainWinKeyPressEvent
         self.mainWin.closeEvent = self.mainWinCloseEvent
-        self.mainWin.resize(winWidth,winHeight)
-        screenCenter = QtWidgets.QDesktopWidget().availableGeometry().center()
-        mainWinRect = self.mainWin.frameGeometry()
-        mainWinRect.moveCenter(screenCenter)
-        self.mainWin.move(mainWinRect.topLeft())
         
         # file menu
         self.menuBar = self.mainWin.menuBar()
@@ -157,6 +150,14 @@ class EyeTracker():
         self.fileMenuSaveAnnotatedMovie.triggered.connect(self.saveMovie)
         self.fileMenuSave.addActions([self.fileMenuSaveImage,self.fileMenuSaveMovie,self.fileMenuSaveAnnotatedMovie])
         
+        # options menu
+        self.optionsMenu = self.menuBar.addMenu('Options')
+        self.optionsMenuShowTracking = QtWidgets.QAction('Show Pupil Tracking Plots',self.mainWin,checkable=True)
+        self.optionsMenuShowTracking.triggered.connect(self.showPupilTrackingPlots)
+        self.optionsMenuSetDisplayUpdate = QtWidgets.QAction('Set Display Update Interval',self.mainWin)
+        self.optionsMenuSetDisplayUpdate.triggered.connect(self.setDisplayUpdateInterval)
+        self.optionsMenu.addActions([self.optionsMenuShowTracking,self.optionsMenuSetDisplayUpdate])
+        
         # camera menu
         self.cameraMenu = self.menuBar.addMenu('Camera')         
         self.cameraMenuUseCam = QtWidgets.QAction('Use Camera',self.mainWin,checkable=True)
@@ -171,9 +172,6 @@ class EyeTracker():
         self.cameraMenuSaveConfig.triggered.connect(self.saveCamConfig)
         self.cameraMenuSaveConfig.setEnabled(False)
         self.cameraMenu.addActions([self.cameraMenuLoadConfig,self.cameraMenuClearConfig,self.cameraMenuSaveConfig])
-        
-        self.cameraMenuShowAllFrames = QtWidgets.QAction('Show All Frames',self.mainWin,checkable=True)
-        self.cameraMenu.addAction(self.cameraMenuShowAllFrames)
         
         self.cameraMenuSettings = self.cameraMenu.addMenu('Settings')
         self.cameraMenuSettings.setEnabled(False)
@@ -204,8 +202,8 @@ class EyeTracker():
         self.cameraMenuSetSaveFileType.triggered.connect(self.setCamSaveFileType)
         self.cameraMenu.addActions([self.cameraMenuSetSavePath,self.cameraMenuSetSaveBaseName,self.cameraMenuSetSaveFileType])
         
-        # tracking options menu
-        self.trackMenu = self.menuBar.addMenu('Track')
+        # pupil tracking menu
+        self.trackMenu = self.menuBar.addMenu('Pupil Tracking')
         self.trackMenu.setEnabled(False)
         self.trackMenuStopTracking = QtWidgets.QAction('Stop Tracking',self.mainWin,checkable=True)
         self.trackMenuStopTracking.triggered.connect(self.toggleStopTracking)
@@ -309,6 +307,11 @@ class EyeTracker():
         self.analysisMenuSaccadesRefractory.triggered.connect(self.setSaccadeRefractoryPeriod)
         self.analysisMenuSaccades.addActions([self.analysisMenuSaccadesFind,self.analysisMenuSaccadesDelete,self.analysisMenuSaccadesThresh,self.analysisMenuSaccadesSmooth,self.analysisMenuSaccadesRefractory])
         
+        # layout
+        self.createVideoLayout()
+        self.mainWin.show()
+        
+    def createLayoutItems(self):
         # image window
         self.imageLayout = pg.GraphicsLayoutWidget()
         self.imageViewBox = self.imageLayout.addViewBox(lockAspect=1,invertY=True,enableMouse=False,enableMenu=False)
@@ -329,20 +332,55 @@ class EyeTracker():
         # buttons
         self.startVideoButton = QtWidgets.QPushButton('Start Video',checkable=True)
         self.startVideoButton.clicked.connect(self.startVideo)
-        
         self.roiButton = QtWidgets.QPushButton('Set ROI',checkable=True)
         self.roiButton.clicked.connect(self.setROI)
+        self.buttons = (self.startVideoButton,self.roiButton)
         
+        self.saveCheckBox = QtWidgets.QCheckBox('Save Video Data',enabled=False)
+        
+        # frame navigation
+        self.frameNumSpinBox = QtWidgets.QSpinBox()
+        self.frameNumSpinBox.setPrefix('Frame: ')
+        self.frameNumSpinBox.setSuffix(' of 0')
+        self.frameNumSpinBox.setRange(0,1)
+        self.frameNumSpinBox.setSingleStep(1)
+        self.frameNumSpinBox.setValue(0)
+        self.frameNumSpinBox.setEnabled(False)
+        self.frameNumSpinBox.valueChanged.connect(self.goToFrame)
+        self.frameNumSpinBox.blockSignals(True)
+        
+    def createVideoLayout(self):
+        self.mainWidget = QtWidgets.QWidget()
+        self.mainWin.setCentralWidget(self.mainWidget)
+        self.mainLayout = QtWidgets.QGridLayout()
+        self.setLayoutSize(500,600,2,4)
+        self.createLayoutItems()
+        self.mainWidget.setLayout(self.mainLayout)
+        self.mainLayout.addWidget(self.startVideoButton,0,0,1,1)
+        self.mainLayout.addWidget(self.roiButton,0,1,1,1)
+        self.mainLayout.addWidget(self.imageLayout,1,0,2,2)
+        self.mainLayout.addWidget(self.saveCheckBox,3,0,1,1)
+        self.mainLayout.addWidget(self.frameNumSpinBox,3,1,1,1)
+    
+    def createPupilTrackingLayout(self):
+        self.mainWidget = QtWidgets.QWidget()
+        self.mainWin.setCentralWidget(self.mainWidget)
+        self.mainLayout = QtWidgets.QGridLayout()
+        self.setLayoutSize(1000,500,20,4)
+        self.mainWidget.setLayout(self.mainLayout)
+        self.createLayoutItems()
+        
+        # buttons
         self.findPupilButton = QtWidgets.QPushButton('Find Pupil',checkable=True)
         self.findPupilButton.clicked.connect(self.findPupil)
-        
         self.findReflectButton = QtWidgets.QPushButton('Find Reflection',checkable=True)
         self.findReflectButton.clicked.connect(self.findReflect)
-        
         self.setMaskButton = QtWidgets.QPushButton('Set Masks',checkable=True)
         self.setMaskButton.clicked.connect(self.setMask)
+        self.buttons += (self.findPupilButton,self.findReflectButton,self.setMaskButton)
         
-        self.buttons = (self.startVideoButton,self.roiButton,self.findPupilButton,self.findReflectButton,self.setMaskButton)
+        self.useMaskCheckBox = QtWidgets.QCheckBox('Use Masks')
+        self.useMaskCheckBox.clicked.connect(self.setUseMask)
         
         # data plots
         self.dataPlotLayout = pg.GraphicsLayoutWidget()
@@ -398,30 +436,15 @@ class EyeTracker():
         self.edgeDistLowerThreshLine = pg.InfiniteLine(pos=0,angle=0,pen='r',movable=True,bounds=(0,1e4))
         self.edgeDistLowerThreshLine.sigPositionChangeFinished.connect(self.setEdgeDistThresh)
         
-        # save and mask checkboxes
-        self.saveCheckBox = QtWidgets.QCheckBox('Save Video Data',enabled=False)
-        self.useMaskCheckBox = QtWidgets.QCheckBox('Use Masks')
-        self.useMaskCheckBox.clicked.connect(self.setUseMask)
-        
         # frame navigation
-        self.frameNumSpinBox = QtWidgets.QSpinBox()
-        self.frameNumSpinBox.setPrefix('Frame: ')
-        self.frameNumSpinBox.setSuffix(' of 0')
-        self.frameNumSpinBox.setRange(0,1)
-        self.frameNumSpinBox.setSingleStep(1)
-        self.frameNumSpinBox.setValue(0)
-        self.frameNumSpinBox.setEnabled(False)
-        self.frameNumSpinBox.valueChanged.connect(self.goToFrame)
-        self.frameNumSpinBox.blockSignals(True)
-        
         self.pupilAreaFrameNumLine = pg.InfiniteLine(pos=0,pen='r',movable=True,bounds=(0,1))
         self.pupilXFrameNumLine = pg.InfiniteLine(pos=0,pen='r',movable=True,bounds=(0,1))
         self.pupilYFrameNumLine = pg.InfiniteLine(pos=0,pen='r',movable=True,bounds=(0,1))
         self.frameNumLines = (self.pupilAreaFrameNumLine,self.pupilXFrameNumLine,self.pupilYFrameNumLine)
         for line in self.frameNumLines:
             line.sigDragged.connect(self.frameNumLineDragged)
-            line.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)    
-        
+            line.sigPositionChangeFinished.connect(self.frameNumLinePosChangeFin)
+            
         # data plot duration control
         self.plotDurLayout = QtWidgets.QFormLayout()
         self.plotDurEdit = QtWidgets.QLineEdit(str(self.defaultDataPlotDur))
@@ -430,21 +453,6 @@ class EyeTracker():
         self.plotDurLayout.addRow('Plot Duration',self.plotDurEdit)
         
         # layout
-        self.mainWidget = QtWidgets.QWidget()
-        self.mainWin.setCentralWidget(self.mainWidget)
-        self.mainLayout = QtWidgets.QGridLayout()
-        nCols = 20
-        nRows = 4
-        for col in range(nCols):
-            self.mainLayout.setColumnMinimumWidth(col,winWidth/nCols)
-            self.mainLayout.setColumnStretch(col,1)
-        rowHeights = np.zeros(nRows)
-        rowHeights[[0,-1]] = 0.05*winHeight
-        rowHeights[1:-1] = 0.9*winHeight/(nRows-2)
-        for row in range(nRows):
-            self.mainLayout.setRowMinimumHeight(row,rowHeights[row])
-            self.mainLayout.setRowStretch(row,1)
-        self.mainWidget.setLayout(self.mainLayout)
         self.mainLayout.addWidget(self.imageLayout,0,0,4,10)
         self.mainLayout.addWidget(self.startVideoButton,0,10,1,2)
         self.mainLayout.addWidget(self.roiButton,0,12,1,2)
@@ -456,7 +464,31 @@ class EyeTracker():
         self.mainLayout.addWidget(self.useMaskCheckBox,3,12,1,2)
         self.mainLayout.addWidget(self.frameNumSpinBox,3,14,1,3)
         self.mainLayout.addLayout(self.plotDurLayout,3,17,1,3)
-        self.mainWin.show()
+        self.mainWin.keyPressEvent = self.mainWinKeyPressEvent
+        
+    def setLayoutSize(self,winWidth,winHeight,nCols,nRows):
+        self.app.processEvents()
+        self.mainWin.resize(winWidth,winHeight)
+        mainWinRect = self.mainWin.frameGeometry()
+        mainWinRect.moveCenter(QtWidgets.QDesktopWidget().availableGeometry().center())
+        self.mainWin.move(mainWinRect.topLeft())
+        for col in range(nCols):
+            self.mainLayout.setColumnMinimumWidth(col,winWidth/nCols)
+            self.mainLayout.setColumnStretch(col,1)
+        rowHeights = np.zeros(nRows)
+        rowHeights[[0,-1]] = 0.05*winHeight
+        rowHeights[1:-1] = 0.9*winHeight/(nRows-2)
+        for row in range(nRows):
+            self.mainLayout.setRowMinimumHeight(row,rowHeights[row])
+            self.mainLayout.setRowStretch(row,1)
+            
+    def showPupilTrackingPlots(self):
+        if self.optionsMenuShowTracking.isChecked():
+            self.createPupilTrackingLayout()
+        else:
+            self.createVideoLayout()
+        if self.image is not None:
+            self.initDisplay()
         
     def mainWinCloseEvent(self,event):
         if self.cam is not None:
@@ -607,17 +639,7 @@ class EyeTracker():
                 self.frameTimes = np.nan
         if not np.all(np.isnan(self.frameTimes)):
             self.frameTimes -= self.frameTimes[0]
-        self.frameNumSpinBox.setRange(1,self.numFrames)
-        self.frameNumSpinBox.setValue(1)
-        self.frameNumSpinBox.setSuffix(' of '+str(self.numFrames))
-        self.frameNumSpinBox.blockSignals(False)
-        self.frameNumSpinBox.setEnabled(True)
-        self.fileMenuOpenData.setEnabled(True)
         self.fileMenuSave.setEnabled(True)
-        self.analysisMenu.setEnabled(True)
-        for line in self.frameNumLines:
-            line.setBounds((0,(self.numFrames-1)/self.frameRate))
-        self.addFrameNumLines()
         self.frameNum = 1
         self.getVideoImage()
         self.resetROI()
@@ -671,12 +693,14 @@ class EyeTracker():
         self.fileMenuOpenData.setEnabled(False)
         self.fileMenuSave.setEnabled(False)
         self.analysisMenu.setEnabled(False)
-        self.removeFrameNumLines()
-        for line in self.frameNumLines:
-            line.setValue(0)
+        self.image = None
         self.frameTimes = []
-        self.resetPupilTracking()
-        self.deleteAllSaccades()
+        if self.optionsMenuShowTracking.isChecked():
+            self.removeFrameNumLines()
+            for line in self.frameNumLines:
+                line.setValue(0)
+            self.resetPupilTracking()
+            self.deleteAllSaccades()
         self.mainWin.setWindowTitle('MouseEyeTracker')
        
     def initCamera(self):
@@ -699,7 +723,6 @@ class EyeTracker():
                 self.cam.open()
             elif self.camType=='webcam':
                 self.cam = cv2.VideoCapture(int(self.camName[6:]))
-                self.cameraMenuShowAllFrames.setChecked(True)
             else:
                 self.cameraMenuUseCam.setChecked(False)
                 return
@@ -802,18 +825,19 @@ class EyeTracker():
         else:
             self.cam.release()
         self.cam = None
+        self.image = None
         if self.nidaq is not None:
             self.nidaqDigitalIn.close()
             self.nidaqDigitalOut.close()
             self.nidaq = None
-        self.cameraMenuShowAllFrames.setChecked(False)
         self.cameraMenuSettings.setEnabled(False)
         self.cameraMenuLoadConfig.setEnabled(True)
         self.cameraMenuClearConfig.setEnabled(True)
         self.cameraMenuSaveConfig.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
-        self.resetPupilTracking()
+        if self.optionsMenuShowTracking.isChecked():
+            self.resetPupilTracking()
         self.mainWin.setWindowTitle('MouseEyeTracker')
         
     def startCamera(self,bufferSize=1):
@@ -1082,12 +1106,23 @@ class EyeTracker():
                     
     def initDisplay(self):
         self.resetImage()
-        self.setDataPlotDur()
-        self.setDataPlotTime()
-        self.resetPupilData()
-        self.resetPupilDataPlot()        
-        self.setDataPlotXRange()
-        self.trackMenu.setEnabled(True)
+        if self.cam is None:
+            self.frameNumSpinBox.setRange(1,self.numFrames)
+            self.frameNumSpinBox.setValue(self.frameNum)
+            self.frameNumSpinBox.setSuffix(' of '+str(self.numFrames))
+            self.frameNumSpinBox.blockSignals(False)
+            self.frameNumSpinBox.setEnabled(True)
+        if self.optionsMenuShowTracking.isChecked():
+            for line in self.frameNumLines:
+                line.setBounds((0,(self.numFrames-1)/self.frameRate))
+            self.addFrameNumLines()
+            self.setDataPlotDur()
+            self.setDataPlotTime()
+            self.resetPupilData()
+            self.resetPupilDataPlot()        
+            self.setDataPlotXRange()
+            self.trackMenu.setEnabled(True)
+            self.analysisMenu.setEnabled(True)
                
     def resetROI(self,keepPosAndSize=False):
         if self.cam is not None:
@@ -1155,7 +1190,8 @@ class EyeTracker():
                 self.frameNumSpinBox.blockSignals(True)
                 if self.frameNum==self.numFrames:
                     self.frameNum = 0
-                    self.setDataPlotXRange()
+                    if self.optionsMenuShowTracking.isChecked():
+                        self.setDataPlotXRange()
                     if self.videoIn is not None:
                         self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,0)
                 while self.startVideoButton.isChecked():
@@ -1165,13 +1201,14 @@ class EyeTracker():
                     self.frameNum += 1
                     self.frameNumSpinBox.setValue(self.frameNum)
                     self.getVideoImage()
-                    self.updateDisplay(showAll=self.cameraMenuShowAllFrames.isChecked())
+                    self.updateDisplay()
                     self.app.processEvents()
             else:
                 self.frameNum = 0
                 self.startCamera(bufferSize=self.camBufferSize)
                 if self.camType=='vimba':
-                    self.resetPupilData()
+                    if self.optionsMenuShowTracking.isChecked():
+                        self.resetPupilData()
                     for frame in self.camFrames:
                         frame.queue_for_capture(frame_callback=camFrameCaptured)
                     self.cam.AcquisitionStart()
@@ -1220,11 +1257,15 @@ class EyeTracker():
                 self.updatePupilDataPlot(updatePlotN)
         if self.trackMenuAdaptThresh.isChecked():
             self.meanImageIntensity = self.image.mean()
+            
+    def setDisplayUpdateInterval(self):
+        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Display Update Interval','Frames:',value=self.camBinning,min=1,max=10)
+        if ok:
+            self.displayUpdateInterval = val
         
     def processCamFrame(self,img,timestamp):
         self.frameNum += 1
         self.image = img
-        showAll = self.cameraMenuShowAllFrames.isChecked()
         showNone = False
         if self.saveCheckBox.isChecked() or (self.nidaq and self.cameraMenuNidaqIn.isChecked() and self.nidaqDigitalIn.read()):
             if self.dataFileOut is None:
@@ -1242,7 +1283,6 @@ class EyeTracker():
                 else:
                     self.videoOut = self.skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
                 showNone = True
-                showAll = False
             else:
                 if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(True)
@@ -1260,7 +1300,7 @@ class EyeTracker():
         elif self.dataFileOut is not None:
             self.closeDataFileOut()
             showNone = True
-        self.updateDisplay(showAll,showNone)       
+        self.updateDisplay(showNone)       
         
     def closeDataFileOut(self):
         self.dataFileOut.close()
@@ -1315,11 +1355,6 @@ class EyeTracker():
                     if self.frameNum>self.numFrames:
                         self.frameNum = self.numFrames
                 self.frameNumSpinBox.setValue(self.frameNum)
-        elif key==QtCore.Qt.Key_N:
-            if int(modifiers & QtCore.Qt.ControlModifier)>0:
-                self.toggleSetDataNan()
-            elif self.cam is None and not any([button.isChecked() for button in self.buttons]):
-                self.setCurrentFrameDataNan()
         elif key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right,QtCore.Qt.Key_Up,QtCore.Qt.Key_Down,QtCore.Qt.Key_Minus,QtCore.Qt.Key_Equal):
             if key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right,QtCore.Qt.Key_Up,QtCore.Qt.Key_Down) and self.cam is None and not any([button.isChecked() for button in self.buttons]) and self.selectedSaccade is not None:
                 if key in (QtCore.Qt.Key_Left,QtCore.Qt.Key_Right):
@@ -1370,32 +1405,38 @@ class EyeTracker():
                         roiSize[1] += 2
                 roi.setPos(roiPos)
                 roi.setSize(roiSize)
-        elif key==QtCore.Qt.Key_Escape:
-            self.toggleStopTracking()
-        elif key==QtCore.Qt.Key_Space:
-            if self.cam is None and not any([button.isChecked() for button in self.buttons]):
-                self.changePlotWindowDur(fullRange=True)
-        elif key==QtCore.Qt.Key_Delete:
-            if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+        elif self.optionsMenuShowTracking.isChecked():
+            if key==QtCore.Qt.Key_Escape:
+                self.toggleStopTracking()
+            elif key==QtCore.Qt.Key_N:
                 if int(modifiers & QtCore.Qt.ControlModifier)>0:
-                    self.deleteAllSaccades()
-                elif self.selectedSaccade is not None:
-                    self.negSaccades = self.negSaccades[self.negSaccades!=self.selectedSaccade]
-                    self.posSaccades = self.posSaccades[self.posSaccades!=self.selectedSaccade]
-                    self.selectedSaccade = None
+                    self.toggleSetDataNan()
+                elif self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                    self.setCurrentFrameDataNan()
+            elif key==QtCore.Qt.Key_Space:
+                if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                    self.changePlotWindowDur(fullRange=True)
+            elif key==QtCore.Qt.Key_Delete:
+                if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                    if int(modifiers & QtCore.Qt.ControlModifier)>0:
+                        self.deleteAllSaccades()
+                    elif self.selectedSaccade is not None:
+                        self.negSaccades = self.negSaccades[self.negSaccades!=self.selectedSaccade]
+                        self.posSaccades = self.posSaccades[self.posSaccades!=self.selectedSaccade]
+                        self.selectedSaccade = None
+                        self.plotSaccades()
+                elif self.setMaskButton.isChecked() and len(self.maskRoi)>0:
+                    self.imageViewBox.removeItem(self.maskRoi[-1])
+                    del(self.maskRoi[-1])
+                    del(self.maskIndex[-1])
+            elif key==QtCore.Qt.Key_F:
+                if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                    self.findSaccades()
+            elif key==QtCore.Qt.Key_S:
+                if self.cam is None and not any([button.isChecked() for button in self.buttons]):
+                    self.posSaccades = np.unique(np.concatenate((self.posSaccades,[self.frameNum-1])))
+                    self.selectedSaccade = self.frameNum-1
                     self.plotSaccades()
-            elif self.setMaskButton.isChecked() and len(self.maskRoi)>0:
-                self.imageViewBox.removeItem(self.maskRoi[-1])
-                del(self.maskRoi[-1])
-                del(self.maskIndex[-1])
-        elif key==QtCore.Qt.Key_F:
-            if self.cam is None and not any([button.isChecked() for button in self.buttons]):
-                self.findSaccades()
-        elif key==QtCore.Qt.Key_S:
-            if self.cam is None and not any([button.isChecked() for button in self.buttons]):
-                self.posSaccades = np.unique(np.concatenate((self.posSaccades,[self.frameNum-1])))
-                self.selectedSaccade = self.frameNum-1
-                self.plotSaccades()
     
     def imageMouseClickEvent(self,event):
         if event.button()==QtCore.Qt.RightButton and not self.roiButton.isChecked() and not self.findReflectButton.isChecked() and self.reflectCenterSeed is not None:
