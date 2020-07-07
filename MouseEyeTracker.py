@@ -353,7 +353,7 @@ class EyeTracker():
         self.mainWidget = QtWidgets.QWidget()
         self.mainWin.setCentralWidget(self.mainWidget)
         self.mainLayout = QtWidgets.QGridLayout()
-        self.setLayoutSize(500,600,2,4)
+        self.setLayoutSize(500,500,2,4)
         self.createLayoutItems()
         self.mainWidget.setLayout(self.mainLayout)
         self.mainLayout.addWidget(self.startVideoButton,0,0,1,1)
@@ -1236,29 +1236,30 @@ class EyeTracker():
         n = (self.frameNum-1)%self.displayUpdateInterval
         if showAll or (not showNone and n==0):
             self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
-        if self.cam is None:
-            self.selectedSaccade = None
-        elif self.camType=='vimba':
-            if self.dataPlotIndex==self.numDataPlotPts-1:
-                self.dataPlotIndex = 0
-            else:
-                self.dataPlotIndex += 1
-        if not self.stopTracking and (self.setDataNan or self.reflectCenterSeed is not None):
-            self.trackReflect()
-            if showAll or (not showNone and n==0):
-                if self.reflectFound:
-                    self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
+        if self.optionsMenuShowTracking.isChecked():
+            if self.cam is None:
+                self.selectedSaccade = None
+            elif self.camType=='vimba':
+                if self.dataPlotIndex==self.numDataPlotPts-1:
+                    self.dataPlotIndex = 0
                 else:
-                    self.reflectCenterPlot.setData(x=[],y=[])
-        if not self.stopTracking and (self.setDataNan or self.pupilCenterSeed is not None):
-            self.trackPupil()
-            if showAll or (not showNone and n==0):
-                self.updatePupilPlot()
-        if self.pupilCenterSeed is not None or self.dataIsLoaded:
-            if showAll or (not showNone and n==1):
-                self.updatePupilDataPlot()
-        if self.trackMenuAdaptThresh.isChecked():
-            self.meanImageIntensity = self.image.mean()
+                    self.dataPlotIndex += 1
+            if not self.stopTracking and (self.setDataNan or self.reflectCenterSeed is not None):
+                self.trackReflect()
+                if showAll or (not showNone and n==0):
+                    if self.reflectFound:
+                        self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
+                    else:
+                        self.reflectCenterPlot.setData(x=[],y=[])
+            if not self.stopTracking and (self.setDataNan or self.pupilCenterSeed is not None):
+                self.trackPupil()
+                if showAll or (not showNone and n==0):
+                    self.updatePupilPlot()
+            if self.pupilCenterSeed is not None or self.dataIsLoaded:
+                if showAll or (not showNone and n==1):
+                    self.updatePupilDataPlot()
+            if self.trackMenuAdaptThresh.isChecked():
+                self.meanImageIntensity = self.image.mean()
             
     def setDisplayUpdateInterval(self):
         val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Display Update Interval','Frames:',value=self.displayUpdateInterval,min=1,max=10)
