@@ -483,6 +483,7 @@ class EyeTracker():
             self.mainLayout.setRowStretch(row,1)
             
     def showPupilTrackingPlots(self):
+        self.turnOffButtons()
         if self.optionsMenuShowTracking.isChecked():
             self.createPupilTrackingLayout()
         else:
@@ -1123,6 +1124,19 @@ class EyeTracker():
             self.setDataPlotXRange()
             self.trackMenu.setEnabled(True)
             self.analysisMenu.setEnabled(True)
+        else:
+            self.trackMenu.setEnabled(False)
+            self.analysisMenu.setEnabled(False)
+            
+    def resetImage(self):
+        self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
+        self.imageViewBox.autoRange(items=[self.imageItem])
+        if self.pupilCenterSeed is not None:
+            self.pupilCenterPlot.setData(x=[self.pupilCenterSeed[0]],y=[self.pupilCenterSeed[1]])
+            self.pupilEllipsePlot.setData(x=[],y=[])
+        if self.reflectCenterSeed is not None:
+            self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
+        self.getRadialLines()
                
     def resetROI(self,keepPosAndSize=False):
         if self.cam is not None:
@@ -1137,16 +1151,6 @@ class EyeTracker():
         if not keepPosAndSize:
             self.roiPos = (0,0)
             self.roiSize = (self.image.shape[1],self.image.shape[0])
-        
-    def resetImage(self):
-        self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
-        self.imageViewBox.autoRange(items=[self.imageItem])
-        if self.pupilCenterSeed is not None:
-            self.pupilCenterPlot.setData(x=[self.pupilCenterSeed[0]],y=[self.pupilCenterSeed[1]])
-            self.pupilEllipsePlot.setData(x=[],y=[])
-        if self.reflectCenterSeed is not None:
-            self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
-        self.getRadialLines()
         
     def resetPupilTracking(self):
         self.pupilCenterPlot.setData(x=[],y=[])
@@ -1183,7 +1187,9 @@ class EyeTracker():
         self.pupilYPlot.setData(x=[0,self.dataPlotDur],y=[0,0])
         
     def startVideo(self):
-        if self.startVideoButton.isChecked():
+        if self.image is None:
+            return
+        elif self.startVideoButton.isChecked():
             self.turnOffButtons(source=self.startVideoButton)
             self.startVideoButton.setText('Stop Video')
             if self.cam is None:
@@ -1227,7 +1233,7 @@ class EyeTracker():
             self.startVideoButton.setText('Start Video')
             
     def updateDisplay(self,showAll=False,showNone=False):
-        n = (self.frameNum-1)%5
+        n = (self.frameNum-1)%self.displayUpdateInterval
         if showAll or (not showNone and n==0):
             self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
         if self.cam is None:
@@ -1239,27 +1245,23 @@ class EyeTracker():
                 self.dataPlotIndex += 1
         if not self.stopTracking and (self.setDataNan or self.reflectCenterSeed is not None):
             self.trackReflect()
-            if showAll or (not showNone and n==1):
+            if showAll or (not showNone and n==0):
                 if self.reflectFound:
                     self.reflectCenterPlot.setData(x=[self.reflectCenterSeed[0]],y=[self.reflectCenterSeed[1]])
                 else:
                     self.reflectCenterPlot.setData(x=[],y=[])
         if not self.stopTracking and (self.setDataNan or self.pupilCenterSeed is not None):
             self.trackPupil()
-            if showAll or (not showNone and n==1):
+            if showAll or (not showNone and n==0):
                 self.updatePupilPlot()
         if self.pupilCenterSeed is not None or self.dataIsLoaded:
-            if showAll:
+            if showAll or (not showNone and n==1):
                 self.updatePupilDataPlot()
-            elif not showNone and n>1:
-                updatePlotN = [False,False,False]
-                updatePlotN[n-2] = True
-                self.updatePupilDataPlot(updatePlotN)
         if self.trackMenuAdaptThresh.isChecked():
             self.meanImageIntensity = self.image.mean()
             
     def setDisplayUpdateInterval(self):
-        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Display Update Interval','Frames:',value=self.camBinning,min=1,max=10)
+        val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Display Update Interval','Frames:',value=self.displayUpdateInterval,min=1,max=10)
         if ok:
             self.displayUpdateInterval = val
         
@@ -1517,7 +1519,9 @@ class EyeTracker():
                 self.plotSaccades()
         
     def setROI(self):
-        if self.roiButton.isChecked():
+        if self.image is None:
+            return
+        elif self.roiButton.isChecked():
             self.turnOffButtons(source=self.roiButton)
             self.resetROI(keepPosAndSize=True)
             self.resetImage()
@@ -1580,7 +1584,9 @@ class EyeTracker():
             self.resetImage()
             
     def setMask(self):
-        if self.setMaskButton.isChecked():
+        if self.image is None:
+            return
+        elif self.setMaskButton.isChecked():
             self.turnOffButtons(source=self.setMaskButton)
             for roi in self.maskRoi:
                 roi.setVisible(True)
@@ -1607,7 +1613,9 @@ class EyeTracker():
             self.updatePupilDataPlot()
      
     def findPupil(self):
-        if self.findPupilButton.isChecked():
+        if self.image is None:
+            return
+        elif self.findPupilButton.isChecked():
             self.turnOffButtons(source=self.findPupilButton)
             if self.trackMenuPupilMethodStarburst.isChecked() or self.trackMenuPupilMethodLine.isChecked():
                 if self.pupilCenterSeed is None:
@@ -2066,7 +2074,9 @@ class EyeTracker():
         self.updatePupilTrackParamPlots()
         
     def findReflect(self):
-        if self.findReflectButton.isChecked():
+        if self.image is None:
+            return
+        elif self.findReflectButton.isChecked():
             self.turnOffButtons(source=self.findReflectButton)
             self.reflectCenterPlot.setData(x=[],y=[])
             for i,roi in enumerate(self.reflectRoi):
