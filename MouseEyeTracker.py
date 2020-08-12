@@ -543,7 +543,7 @@ class EyeTracker():
         self.fileOpenSavePath = os.path.dirname(filePath)
         self.reflectCenter += self.roiPos
         self.pupilCenter += self.roiPos
-        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
+        params = ('mmPerPixel','frameID','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
         if fileType=='.hdf5':
             dataFile = h5py.File(filePath,'w',libver='latest')
             dataFile.attrs.create('mmPerPixel',self.mmPerPixel)
@@ -622,10 +622,11 @@ class EyeTracker():
             self.dataFileIn = h5py.File(filePath,'r')
             self.frameRate = self.dataFileIn.attrs.get('frameRate')
             self.mmPerPixel = self.dataFileIn.attrs.get('mmPerPixel')
+            self.frameID = self.dataFileIn['frameID'][:]
             self.frameTimes = self.dataFileIn['frameTimes'][:]
             self.numFrames = self.dataFileIn['frames'].shape[0]
             if np.isnan(self.frameRate):
-                self.frameRate = self.numFrames/self.frameTimes[-1]
+                self.frameRate = self.numFrames/(self.frameTimes[-1]-self.frameTimes[0])
         else:
             self.videoIn = cv2.VideoCapture(filePath)
             self.frameRate = self.videoIn.get(cv2.CAP_PROP_FPS)
@@ -634,9 +635,11 @@ class EyeTracker():
             if os.path.isfile(dataFilePath):
                 dataFile = h5py.File(dataFilePath,'r')
                 self.mmPerPixel = dataFile.attrs.get('mmPerPixel')
+                self.frameID = dataFile['frameID'][:]
                 self.frameTimes = dataFile['frameTimes'][:]
             else:
                 self.mmPerPixel = np.nan
+                self.frameID = np.nan
                 self.frameTimes = np.nan
         if not np.all(np.isnan(self.frameTimes)):
             self.frameTimes -= self.frameTimes[0]
@@ -651,7 +654,7 @@ class EyeTracker():
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
-        params = ('mmPerPixel','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
+        params = ('mmPerPixel','frameID','frameTimes','reflectCenter','pupilCenter','pupilArea','pupilX','pupilY','negSaccades','posSaccades')
         if fileType=='.hdf5':
             dataFile = h5py.File(filePath,'r')
             if 'mmPerPixel' in dataFile.attrs.keys():
@@ -1276,7 +1279,7 @@ class EyeTracker():
             if self.dataFileOut is None:
                 if self.camType=='vimba':
                     self.cam.AcquisitionStop()
-                    self.cam.end_capture() # resets first frameID to 1
+                    self.cam.end_capture() # resets next frameID to 1
                 if self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setChecked(True)
                 self.frameNum = 0
@@ -1304,7 +1307,6 @@ class EyeTracker():
                     timestamp /= self.cam.GevTimestampTickFrequency
                 self.frameIdDataset.resize(self.frameNum,axis=0)
                 self.frameIdDataset[-1] = frameID
-                print(frameID)
                 self.frameTimeDataset.resize(self.frameNum,axis=0)
                 self.frameTimeDataset[-1] = timestamp
                 if self.camSaveFileType=='.hdf5':
@@ -2311,12 +2313,17 @@ class EyeTracker():
     def plotFrameIntervals(self):
         if np.all(np.isnan(self.frameTimes)):
             return
+        frameNum = np.arange(1,self.numFrames+1)
         frameIntervals = np.diff(self.frameTimes)*1e3
-        plt.figure()
-        plt.plot(range(2,self.numFrames+1),frameIntervals)
-        plt.axis([1,self.numFrames,0,max(frameIntervals)*1.1])
-        plt.xlabel('Frame Number')
-        plt.ylabel('Frame Interval (ms)')
+        fig = plt.figure()
+        ax = fig.add_subplot(2,1,1)
+        ax.plot(frameNum,self.frameID)
+        ax.set_ylabel('Frame ID')
+        ax = fig.add_subplot(2,1,2)
+        ax.plot(frameNum[1:],frameIntervals)
+        ax.set_ylim([0,plt.get(ax,'ylim')[1]])
+        ax.set_xlabel('Frame Number')
+        ax.set_ylabel('Frame Interval (ms)')
         plt.show()
         
     def findSaccades(self):
@@ -2336,7 +2343,7 @@ class EyeTracker():
         self.plotSaccades()
         
     def getPupilVelocity(self):
-        if np.all(np.isnan(frameTimes)):
+        if np.all(np.isnan(self.frameTimes)):
             t = np.arange(self.numFrames)/self.frameRate
         else:
             t = self.frameTimes
