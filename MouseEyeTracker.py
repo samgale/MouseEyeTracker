@@ -1276,7 +1276,7 @@ class EyeTracker():
             if self.dataFileOut is None:
                 if self.camType=='vimba':
                     self.cam.AcquisitionStop()
-                    self.cam.end_capture()
+                    self.cam.end_capture() # resets first frameID to 1
                 if self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setChecked(True)
                 self.frameNum = 0
