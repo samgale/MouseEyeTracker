@@ -71,6 +71,7 @@ class EyeTracker():
         self.roi = None
         self.blurSigma = 2.0
         self.imgExponent = 2.0
+        self.showTracking = False
         self.stopTracking = False
         self.setDataNan = False
         self.pupilCenterSeed = None
@@ -484,7 +485,9 @@ class EyeTracker():
             
     def showPupilTrackingPlots(self):
         self.turnOffButtons()
-        if self.optionsMenuShowTracking.isChecked():
+        self.app.processEvents()
+        self.showTracking = self.optionsMenuShowTracking.isChecked()
+        if self.showTracking:
             self.createPupilTrackingLayout()
         else:
             self.createVideoLayout()
@@ -699,7 +702,7 @@ class EyeTracker():
         self.analysisMenu.setEnabled(False)
         self.image = None
         self.frameTimes = []
-        if self.optionsMenuShowTracking.isChecked():
+        if self.showTracking:
             self.removeFrameNumLines()
             for line in self.frameNumLines:
                 line.setValue(0)
@@ -840,7 +843,7 @@ class EyeTracker():
         self.cameraMenuSaveConfig.setEnabled(False)
         self.trackMenuMmPerPixMeasure.setEnabled(False)
         self.saveCheckBox.setEnabled(False)
-        if self.optionsMenuShowTracking.isChecked():
+        if self.showTracking:
             self.resetPupilTracking()
         self.mainWin.setWindowTitle('MouseEyeTracker')
         
@@ -942,7 +945,7 @@ class EyeTracker():
         val,ok = QtWidgets.QInputDialog.getInt(self.mainWin,'Set Camera Spatial Binning','Pixels:',value=self.camBinning,min=1,max=8)
         if not ok:
             return
-        if self.optionsMenuShowTracking.isChecked():
+        if self.showTracking:
             scaleFactor = self.camBinning/val
             if self.pupilCenterSeed is not None:
                 self.pupilCenterSeed = [int(n*scaleFactor) for n in self.pupilCenterSeed]
@@ -1118,10 +1121,11 @@ class EyeTracker():
             self.frameNumSpinBox.setSuffix(' of '+str(self.numFrames))
             self.frameNumSpinBox.blockSignals(False)
             self.frameNumSpinBox.setEnabled(True)
-        if self.optionsMenuShowTracking.isChecked():
-            for line in self.frameNumLines:
-                line.setBounds((0,(self.numFrames-1)/self.frameRate))
-            self.addFrameNumLines()
+        if self.showTracking:
+            if self.cam is None:
+                for line in self.frameNumLines:
+                    line.setBounds((0,(self.numFrames-1)/self.frameRate))
+                self.addFrameNumLines()
             self.setDataPlotDur()
             self.setDataPlotTime()
             self.resetPupilData()
@@ -1201,7 +1205,7 @@ class EyeTracker():
                 self.frameNumSpinBox.blockSignals(True)
                 if self.frameNum==self.numFrames:
                     self.frameNum = 0
-                    if self.optionsMenuShowTracking.isChecked():
+                    if self.showTracking:
                         self.setDataPlotXRange()
                     if self.videoIn is not None:
                         self.videoIn.set(cv2.CAP_PROP_POS_FRAMES,0)
@@ -1218,7 +1222,7 @@ class EyeTracker():
                 self.frameNum = 0
                 self.startCamera(bufferSize=self.camBufferSize)
                 if self.camType=='vimba':
-                    if self.optionsMenuShowTracking.isChecked():
+                    if self.showTracking:
                         self.resetPupilData()
                     for frame in self.camFrames:
                         frame.queue_for_capture(frame_callback=camFrameCaptured)
@@ -1241,7 +1245,7 @@ class EyeTracker():
         n = (self.frameNum-1)%self.displayUpdateInterval
         if showAll or (not showNone and n==0):
             self.imageItem.setImage(self.image[self.roiInd].T,levels=(0,255))
-        if self.optionsMenuShowTracking.isChecked():
+        if self.showTracking:
             if self.cam is None:
                 self.selectedSaccade = None
             elif self.camType=='vimba':
@@ -1430,7 +1434,7 @@ class EyeTracker():
                         roiSize[1] += 2
                 roi.setPos(roiPos)
                 roi.setSize(roiSize)
-        elif self.optionsMenuShowTracking.isChecked():
+        elif self.showTracking:
             if key==QtCore.Qt.Key_Escape:
                 self.toggleStopTracking()
             elif key==QtCore.Qt.Key_N:
@@ -1571,7 +1575,7 @@ class EyeTracker():
                     newSize.append(maxSize-p)
                 else:
                     newSize.append(int(s))
-            if self.optionsMenuShowTracking.isChecked():
+            if self.showTracking:
                 deltaPos = [newPos[i]-self.roiPos[i] for i in (0,1)]
                 self.pupilCenter -= deltaPos
                 self.reflectCenter -= deltaPos
