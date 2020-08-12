@@ -21,7 +21,7 @@ from matplotlib import pyplot as plt
 
 class QtSignalGenerator(QtCore.QObject):
 
-    camFrameCapturedSignal = QtCore.pyqtSignal(np.ndarray,float)
+    camFrameCapturedSignal = QtCore.pyqtSignal(np.ndarray,int,float)
     
     def __init__(self):
         QtCore.QObject.__init__(self)
@@ -34,7 +34,7 @@ qtSignalGeneratorObj = QtSignalGenerator()
 
 def camFrameCaptured(frame):
     img = frame.buffer_data_numpy()
-    qtSignalGeneratorObj.camFrameCapturedSignal.emit(img,frame.data.timestamp)
+    qtSignalGeneratorObj.camFrameCapturedSignal.emit(img,frame.data.frameID,frame.data.timestamp)
     frame.queue_for_capture(frame_callback=camFrameCaptured)
 
 
@@ -907,7 +907,8 @@ class EyeTracker():
             self.cam.feature('TriggerMode').value = 'Off'
             self.cam.feature('TriggerSource').value = 'FixedRate'
             self.cam.feature('SyncOutSelector').value = 'SyncOut2'
-            self.cam.feature('SyncOutSource').value = 'Exposing'
+            self.cam.feature('SyncOutSource').value = 'GPO'
+            self.cam.feature('SyncOutLevels').value = 0
             self.cam.feature('SyncOutPolarity').value = 'Normal'
         else:
             self.camBufferSize = None
@@ -1267,31 +1268,43 @@ class EyeTracker():
         if ok:
             self.displayUpdateInterval = val
         
-    def processCamFrame(self,img,timestamp):
+    def processCamFrame(self,img,frameID,timestamp):
         self.frameNum += 1
         self.image = img
         showNone = False
         if self.saveCheckBox.isChecked() or (self.nidaq and self.cameraMenuNidaqIn.isChecked() and self.nidaqDigitalIn.read()):
             if self.dataFileOut is None:
-                self.frameNum = 0
+                if self.camType=='vimba':
+                    self.cam.AcquisitionStop()
+                    self.cam.end_capture()
                 if self.cameraMenuNidaqIn.isChecked():
                     self.saveCheckBox.setChecked(True)
+                self.frameNum = 0
                 fileName = os.path.join(self.camSavePath,self.camSaveBaseName+'_'+time.strftime('%Y%m%d_%H%M%S'))
                 self.dataFileOut = h5py.File(fileName+'.hdf5','w',libver='latest')
                 self.dataFileOut.attrs.create('frameRate',self.frameRate)
                 self.dataFileOut.attrs.create('mmPerPixel',self.mmPerPixel)
+                self.frameIdDataset = self.dataFileOut.create_dataset('frameID',(0,),maxshape=(None,),dtype=int)
                 self.frameTimeDataset = self.dataFileOut.create_dataset('frameTimes',(0,),maxshape=(None,),dtype=float)
                 if self.camSaveFileType=='.hdf5':
                     imgShape = tuple(self.roiSize[::-1])
                     self.frameDataset = self.dataFileOut.create_dataset('frames',(0,)+imgShape,maxshape=(None,)+imgShape,dtype=img.dtype,chunks=(1,)+imgShape,compression='gzip',compression_opts=1)
                 else:
                     self.videoOut = self.skvideo.io.FFmpegWriter(fileName+self.camSaveFileType,inputdict={'-r':str(self.frameRate)},outputdict={'-r':str(self.frameRate),'-vcodec':'libx264','-crf':'17'})
+                if self.camType=='vimba':
+                    self.cam.feature('SyncOutSelector').value = 'SyncOut2'
+                    self.cam.feature('SyncOutSource').value = 'Exposing'
+                    self.cam.start_capture()
+                    self.cam.AcquisitionStart()
                 showNone = True
             else:
                 if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(True)
                 if self.camType=='vimba':
                     timestamp /= self.cam.GevTimestampTickFrequency
+                self.frameIdDataset.resize(self.frameNum,axis=0)
+                self.frameIdDataset[-1] = frameID
+                print(frameID)
                 self.frameTimeDataset.resize(self.frameNum,axis=0)
                 self.frameTimeDataset[-1] = timestamp
                 if self.camSaveFileType=='.hdf5':
@@ -1302,7 +1315,13 @@ class EyeTracker():
                 if self.nidaq and self.cameraMenuNidaqOut.isChecked():
                     self.nidaqDigitalOut.write(False)
         elif self.dataFileOut is not None:
+            if self.camType=='vimba':
+                self.cam.AcquisitionStop()
             self.closeDataFileOut()
+            if self.camType=='vimba':
+                self.cam.feature('SyncOutSource').value = 'GPO'
+                self.cam.feature('SyncOutLevels').value = 0
+                self.cam.AcquisitionStart()
             showNone = True
         self.updateDisplay(showNone)       
         
