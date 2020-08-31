@@ -719,12 +719,15 @@ class EyeTracker():
             if self.camConfig:
                 if self.camType=='vimba':
                     self.initVimba()
+                if self.nidaq:
+                    self.initNidaq()
                 if self.camSaveFileType=='.mp4' and self.skvideo is None:
                     self.initSkvideo()
                     if self.skvideo is None:
                         self.camSaveFileType = '.hdf5'
             else:
                 self.getCamera()
+                self.initNidaq()
             if self.camType=='vimba':
                 self.cam = self.vimba.camera(self.camName)
                 self.cam.open()
@@ -733,7 +736,6 @@ class EyeTracker():
             else:
                 self.cameraMenuUseCam.setChecked(False)
                 return
-            self.initNidaq()
             self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+self.camName+'     '+'nidaq: '+str(self.nidaq))
             self.setCamProps()
             self.frameNum = 0
