@@ -38,12 +38,14 @@ def camFrameCaptured(frame):
     frame.queue_for_capture(frame_callback=camFrameCaptured)
 
 
-def start():
+def start(configPath=None):
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication([])
     eyeTrackerObj = EyeTracker(app)
     qtSignalGeneratorObj.camFrameCapturedSignal.connect(eyeTrackerObj.processCamFrame)
+    if configPath:
+        eyeTrackerObj.setCamConfig(configPath)
     app.exec_()
 
 
@@ -94,7 +96,8 @@ class EyeTracker():
         self.saccadeSmoothPts = 3
         self.saccadeThresh = 5
         self.saccadeRefractoryPeriod = 0.1
-        self.configItems = ('camName',
+        self.configItems = ('camLabel',
+                            'camName',
                             'camType',
                             'camSavePath',
                             'camSaveBaseName',
@@ -474,13 +477,13 @@ class EyeTracker():
         mainWinRect.moveCenter(QtWidgets.QDesktopWidget().availableGeometry().center())
         self.mainWin.move(mainWinRect.topLeft())
         for col in range(nCols):
-            self.mainLayout.setColumnMinimumWidth(col,winWidth/nCols)
+            self.mainLayout.setColumnMinimumWidth(col,int(winWidth/nCols))
             self.mainLayout.setColumnStretch(col,1)
         rowHeights = np.zeros(nRows)
         rowHeights[[0,-1]] = 0.05*winHeight
         rowHeights[1:-1] = 0.9*winHeight/(nRows-2)
         for row in range(nRows):
-            self.mainLayout.setRowMinimumHeight(row,rowHeights[row])
+            self.mainLayout.setRowMinimumHeight(row,int(rowHeights[row]))
             self.mainLayout.setRowStretch(row,1)
             
     def showPupilTrackingPlots(self):
@@ -726,6 +729,7 @@ class EyeTracker():
                     if self.skvideo is None:
                         self.camSaveFileType = '.hdf5'
             else:
+                self.camLabel = None
                 self.getCamera()
                 self.initNidaq()
             if self.camType=='vimba':
@@ -736,7 +740,8 @@ class EyeTracker():
             else:
                 self.cameraMenuUseCam.setChecked(False)
                 return
-            self.mainWin.setWindowTitle('MouseEyeTracker'+'     '+'camera: '+self.camName+'     '+'nidaq: '+str(self.nidaq))
+            label = 'MouseEyeTracker' if self.camLabel is None else str(self.camLabel)
+            self.mainWin.setWindowTitle(label+'     '+'camera: '+self.camName+'     '+'nidaq: '+str(self.nidaq))
             self.setCamProps()
             self.frameNum = 0
             self.getCamImage()
@@ -896,7 +901,11 @@ class EyeTracker():
             self.cam.feature('BinningHorizontal').value = self.camBinning
             self.cam.feature('BinningVertical').value = self.camBinning
             self.fullRoiSize = (self.cam.feature('WidthMax').value,self.cam.feature('HeightMax').value)
-            if not self.camConfig:
+            if self.camConfig:
+                if self.roiPos is None:
+                    self.roiPos = (0,0)
+                    self.roiSize = self.fullRoiSize
+            else:
                 self.camBufferSize = 60
                 self.camExposure = 0.9
                 self.frameRate = 60.0
@@ -922,7 +931,11 @@ class EyeTracker():
             self.camBufferSize = None
             self.frameRate = np.nan
             self.webcamDefaultFrameShape = (int(self.cam.get(cv2.CAP_PROP_FRAME_HEIGHT)),int(self.cam.get(cv2.CAP_PROP_FRAME_WIDTH)))
-            if not self.camConfig:
+            if self.camConfig:
+                if self.roiPos is None:
+                    self.roiPos = (0,0)
+                    self.roiSize = self.webcamDefaultFrameShape[::-1]
+            else:
                 self.camBinning = 1
                 self.camExposure = 1
                 self.roiPos = (0,0)
@@ -1036,6 +1049,9 @@ class EyeTracker():
         if filePath=='':
             return
         self.fileOpenSavePath = os.path.dirname(filePath)
+        self.setCamConfig(self,filePath)
+
+    def setCamConfig(self,filePath):
         with open(filePath,'r') as file:
             config = json.load(file)
         for item in self.configItems:
@@ -1044,6 +1060,8 @@ class EyeTracker():
                 attr.setChecked(config[item])
             else:
                 setattr(self,item,config[item])
+        if self.camSavePath is None:
+            self.camSavePath = os.path.dirname(os.path.realpath(__file__))
         self.camConfig = True
         self.cameraMenuUseCam.setChecked(True)
         self.initCamera()
@@ -2399,4 +2417,6 @@ class EyeTracker():
         
 
 if __name__=="__main__":
-    start()
+    import sys
+    configPath = sys.argv[1] if len(sys.argv) > 1 else None
+    start(configPath)
