@@ -9,11 +9,12 @@ Acquire data with camera or analyze data from hdf5 or video file
 from __future__ import division
 import sip
 sip.setapi('QString', 2)
-import h5py, json, math, os, time
-import cv2
+import json, math, os, time
 import numpy as np
 import scipy.io
 import scipy.signal
+import cv2
+import h5py
 from PyQt5 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 from matplotlib import pyplot as plt
