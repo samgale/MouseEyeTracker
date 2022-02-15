@@ -7,8 +7,6 @@ Acquire data with camera or analyze data from hdf5 or video file
 """
 
 from __future__ import division
-import sip
-sip.setapi('QString', 2)
 import json, math, os, time
 import numpy as np
 import scipy.io
